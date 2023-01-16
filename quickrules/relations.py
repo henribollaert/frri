@@ -54,4 +54,4 @@ class MinMaxRelation:
         self.denominator = np.abs(np.max(data) - np.min(data))
 
     def get_value(self, a: float, b: float) -> float:
-        return 1 - np.frac(np.abs(a - b), self.denominator)
+        return 1 - np.divide(np.abs(a - b), self.denominator)
