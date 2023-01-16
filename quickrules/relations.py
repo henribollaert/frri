@@ -7,7 +7,7 @@ class AttributeRelation(Protocol):
     def initialise(self, data: np.ndarray):
         ...
 
-    def __call__(self, a: float, b: float) -> float:
+    def get_value(self, a: float, b: float) -> float:
         ...
 
 
@@ -28,7 +28,7 @@ class Relation:
         result = 1.0
         for val_a, val_b, rel, used in zip(a, b, self.attribute_relations, attributes):
             if used:
-                result = self.t_norm(result, rel(val_a, val_b))
+                result = self.t_norm(result, rel.get_value(val_a, val_b))
         return result
 
 
@@ -52,5 +52,5 @@ class MinMaxRelation:
     def initialise(self, data: np.ndarray):
         self.denominator = np.abs(np.max(data) - np.min(data))
 
-    def __call__(self, a, b):
+    def get_value(self, a: float, b: float) -> float:
         return 1 - np.frac(np.abs(a - b), self.denominator)
