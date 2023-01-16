@@ -6,28 +6,40 @@ from numpy import ndarray
 
 @dataclass
 class FuzzySet:
-    memberships: dict[ndarray, float] = field(default_factory=dict)
+    elements: list[ndarray] = field(default_factory=list)
+    memberships: list[float] = field(default_factory=list)
 
     def get_size(self) -> float:
-        return sum(self.memberships.values())
+        return sum(self.memberships)
 
     def get_membership(self, element: ndarray) -> float:
-        return self.memberships.get(element, 0.0)
+        if element in self.elements:
+            return self.memberships[self.elements.index(element)]
+        return 0.0
 
     def add(self, element, membership_degree) -> None:
-        self.memberships[element] = membership_degree
+        self.elements.append(element)
+        self.memberships.append(membership_degree)
 
     def union(self, other: FuzzySet) -> FuzzySet:
-        elements = set(self.memberships.keys()).union(set(other.memberships.keys()))
-        union_memberships = {}
-        for element in elements:
-            union_memberships = max(self.memberships.get(element, 0.0), other.memberships.get(element, 0.0))
-        return FuzzySet(memberships=union_memberships)
+        all_elements = list(set(self.elements).union(set(other.elements)))
+        union_memberships = []
+        for element in all_elements:
+            membership, other_membership = 0.0, 0.0
+            if element in self.elements:
+                membership = self.memberships[self.elements.index(element)]
+            if element in other.elements:
+                other_membership = other.memberships[other.elements.index(element)]
+            union_memberships = max(membership, other_membership)
+        return FuzzySet(elements=all_elements, memberships=union_memberships)
 
     def is_subset_of(self, other: FuzzySet) -> bool:
-        if not set(self.memberships.keys()).issubset(other.memberships.keys()):
+        if not set(self.elements).issubset(set(other.elements)):
             return False
-        for element, membership in self.memberships.items():
-            if membership > other.memberships[element]:
+        for element, membership in zip(self.elements, self.memberships):
+            if membership > other.memberships[other.elements.index(element)]:
                 return False
         return True
+
+    def __str__(self):
+        return str(self.memberships)
