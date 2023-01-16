@@ -41,6 +41,14 @@ class Rule:
     decision: int | str  # the decision class/consequent of the rule. type depends on the data set
     coverage: FuzzySet
 
+    def __str__(self):
+        s = "("
+        for nr, (used, value) in enumerate(zip(self.attributes, self.generating_element)):
+            if used:
+                s += f"a_{nr+1}={value},"
+        s += f"decision={self.decision})"
+        return s
+
 
 class QuickRules:
     """
@@ -90,12 +98,12 @@ class QuickRules:
                     b_with_a[attribute] = True
 
                     gamma_b_with_a = 0  # we will need to compare this later, and don't need a fuzzy set for this
-                    for sample, label in zip(self.X, self.y):
+                    for sample_index, (sample, label) in enumerate(zip(self.X, self.y)):
                         membership = self._calculate_single_pos_membership(sample, label, b_with_a)
                         gamma_b_with_a += membership
                         # we only look at not fully covered samples
-                        if self.covered.get_membership(sample) != pos_a.get_membership(sample) and \
-                                membership == pos_a.get_membership(sample):
+                        if self.covered.get_membership(sample_index) != pos_a.get_membership(sample_index) and \
+                                membership == pos_a.get_membership(sample_index):
                             new_rule = self._create_rule(b_with_a, sample, label)
                             self.check(new_rule)
                     if gamma_b_with_a > temp_gamma:
@@ -124,8 +132,7 @@ class QuickRules:
     def _create_rule(self, attributes, generating_element, decision) -> Rule:
         """
         Creates a rule defined by the given attributes, generating element and decision class.
-        We calculate the coverage of the rule in the training set during creation.
-
+        We calculate the coverage of the rule in the training set during creation
         :param attributes:  attributes used in the antecedent of the rule
         :param generating_element:  element which holds the values for those attributes
         :param decision:  decision class of the consequent
@@ -133,10 +140,10 @@ class QuickRules:
         """
         # first we calculate the coverage
         coverage = FuzzySet()
-        for sample in self.X:
+        for index, sample in enumerate(self.X):
             membership = self.relation(generating_element, sample, attributes)
             if membership > 0.0:
-                coverage.add(sample, membership)
+                coverage.add(index, membership)
         # now we have all required parameters
         return Rule(attributes, generating_element, decision, coverage)
 
@@ -162,8 +169,8 @@ class QuickRules:
         Calculates the positive region for the entire set of attributes.
         """
         pos = FuzzySet()
-        for sample, label in zip(self.X, self.y):
-            pos.add(sample, self._calculate_single_pos_membership(sample, label))
+        for index, (sample, label) in enumerate(zip(self.X, self.y)):
+            pos.add(index, self._calculate_single_pos_membership(sample, label))
         return pos
 
     def _calculate_single_pos_membership(self, sample: np.ndarray, label, attributes: list[bool] = None) -> float:
@@ -174,12 +181,11 @@ class QuickRules:
         :param attributes: a list of booleans containing True if we use the attribute. If None, we use all attributes
         :return: the membership degree to the positive region given by the attributes for the sample.
         """
-        # todo check
         if attributes is None:
             attributes = [True for _ in range(self.nr_of_attributes)]
 
         membership = 1
         for other, other_label in zip(self.X, self.y):
-            if other_label != label:
-                membership = min(membership, self.implicator(self.relation(sample, other, attributes), 0))
+            class_membership = 1 if label == other_label else 0
+            membership = min(membership, self.implicator(self.relation(sample, other, attributes), class_membership))
         return membership
