@@ -42,6 +42,7 @@ class RelationFactory:
         for column in data.T:
             rel = self.attribute_relation_type()
             rel.initialise(column)
+            attribute_relations.append(rel)
         return Relation(attribute_relations, self.t_norm)
 
 
