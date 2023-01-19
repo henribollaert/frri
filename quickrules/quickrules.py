@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from quickrules.fuzzy_set import FuzzySet
 import numpy as np
-from typing import Protocol, Optional
+from typing import Protocol, Optional, TypeVar
+
+LabelType = TypeVar('LabelType', int, str)
 
 
 class TNorm(Protocol):
@@ -38,7 +40,7 @@ class Rule:
     """
     attributes: list[bool]  # set of conditional attributes in the rule's antecedent
     generating_element: np.ndarray  # fuzzy tolerance class of the object that generated the rule
-    decision: int | str  # the decision class/consequent of the rule. type depends on the data set
+    decision: LabelType  # the decision class/consequent of the rule. type depends on the data set
     coverage: FuzzySet
 
     def __str__(self):
@@ -82,7 +84,7 @@ class QuickRules:
         used_attributes = [False for _ in range(self.nr_of_attributes)]
         self.covered = FuzzySet()
 
-        pos_a = self._calculate_full_gamma()  # calculate the positive region for all attributes
+        pos_a = self._get_positive_region()  # calculate the positive region for all attributes
         gamma_a = pos_a.get_size()  # we use the numerator, since denominator is the same everywhere
         gamma_b = 0
 
@@ -116,15 +118,16 @@ class QuickRules:
     def check(self, rule_to_check: Rule):
         # first we check if the new rule will increase the coverage of at least one element
         add = True
+        to_remove = []
         for rule in self.rules:
             if rule_to_check.coverage.is_subset_of(rule.coverage):
                 add = False
                 break
+            elif rule.coverage.is_subset_of(rule_to_check.coverage):
+                to_remove.append(rule)
         if add:
             # if we will add, we remove any rules of which the coverage is a subset of the new rule
-            self.rules[:] = [rule for rule in self.rules
-                             if not rule.coverage.is_subset_of(rule_to_check.coverage)]
-
+            self.rules = [rule for rule in self.rules if rule not in to_remove]
             # then we add the rule and update the coverage
             self.rules.append(rule_to_check)
             self.covered = self.covered.union(rule_to_check.coverage)
@@ -150,7 +153,7 @@ class QuickRules:
     def _evaluate_rule(self, sample, rule):
         return self.relation(sample, rule.generating_element, rule.attributes)
 
-    def _predict_single(self, sample):  # evaluate rules
+    def _predict_single(self, sample: np.ndarray) -> LabelType:  # evaluate rules
         max_value = 0
         pred = None
         for rule in self.rules:
@@ -160,20 +163,28 @@ class QuickRules:
         return pred
 
     # todo we might want the option to get the firing values for each rule
-    def predict(self, x) -> np.ndarray:  # should apply rules to each x
+    def predict(self, x: np.ndarray) -> np.ndarray:  # should apply rules to each x
         result = np.array([self._predict_single(sample) for sample in x])
         return result
 
-    def _calculate_full_gamma(self) -> FuzzySet:
+    def _get_positive_region(self, attributes=None) -> FuzzySet:
         """
-        Calculates the positive region for the entire set of attributes.
+        Calculates the positive region for the given set of attributes. If attributes is none,
+        all attributes are used.
+        :param attributes:  boolean array corresponding to the selected attributes
         """
+        if attributes is None:
+            attributes = [True] * self.nr_of_attributes
+
         pos = FuzzySet()
         for index, (sample, label) in enumerate(zip(self.X, self.y)):
-            pos.add(index, self._calculate_single_pos_membership(sample, label))
+            pos.add(index, self._calculate_single_pos_membership(sample, label, attributes))
         return pos
 
-    def _calculate_single_pos_membership(self, sample: np.ndarray, label, attributes: list[bool] = None) -> float:
+    def _calculate_single_pos_membership(self,
+                                         sample: np.ndarray,
+                                         label: LabelType,
+                                         attributes: list[bool] = None) -> float:
         """
         Calculates POS_attributes(sample)
         :param sample: ndarray containing the values of the conditional attributes of the sample
@@ -182,10 +193,13 @@ class QuickRules:
         :return: the membership degree to the positive region given by the attributes for the sample.
         """
         if attributes is None:
-            attributes = [True for _ in range(self.nr_of_attributes)]
+            attributes = [True] * self.nr_of_attributes
 
         membership = 1
         for other, other_label in zip(self.X, self.y):
-            class_membership = 1 if label == other_label else 0
-            membership = min(membership, self.implicator(self.relation(sample, other, attributes), class_membership))
+            membership = min(membership,
+                             self.implicator(self.relation(sample,
+                                                           other,
+                                                           attributes),
+                                             int(label == other_label)))
         return membership
