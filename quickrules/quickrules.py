@@ -51,6 +51,19 @@ class Rule:
         s += f"decision={self.decision})"
         return s
 
+    def __eq__(self, other):
+        if not isinstance(other, Rule):
+            return False
+        if other is self:
+            return True
+        if self.attributes != other.attributes:
+            return False
+        if not np.array_equal(self.generating_element, other.generating_element):
+            return False
+        if self.decision != other.decision:
+            return False
+        return True
+
 
 class QuickRules:
     """
@@ -70,6 +83,9 @@ class QuickRules:
         self.nr_of_attributes: Optional[int] = None
         self.X: Optional[np.ndarray] = None
         self.y: Optional[np.ndarray] = None
+
+    def get_info(self):
+        return f"@t-norm: {self.t_norm}\n @implicator: {self.implicator}\n @rel:{self.relation_factory}\n"
 
     def fit(self, x: np.ndarray, y: np.ndarray):  # should just use the quick rules algorithm
         # save input
@@ -127,7 +143,8 @@ class QuickRules:
                 to_remove.append(rule)
         if add:
             # if we will add, we remove any rules of which the coverage is a subset of the new rule
-            self.rules = [rule for rule in self.rules if rule not in to_remove]
+            for rule in to_remove:
+                self.rules.remove(rule)
             # then we add the rule and update the coverage
             self.rules.append(rule_to_check)
             self.covered = self.covered.union(rule_to_check.coverage)
@@ -163,7 +180,7 @@ class QuickRules:
         return pred
 
     # todo we might want the option to get the firing values for each rule
-    def predict(self, x: np.ndarray) -> np.ndarray:  # should apply rules to each x
+    def predict(self, x: np.ndarray) -> np.ndarray:
         result = np.array([self._predict_single(sample) for sample in x])
         return result
 
