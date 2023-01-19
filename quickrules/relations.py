@@ -66,3 +66,6 @@ class StatisticalRelation:
 
     def get_value(self, a: float, b: float) -> float:
         return max(min((a - b)/self.std_dev, (b - a)/self.std_dev) + 1, 0)
+
+    def __repr__(self):
+        return "Statistical relation"
