@@ -55,3 +55,14 @@ class MinMaxRelation:
 
     def get_value(self, a: float, b: float) -> float:
         return 1 - np.divide(np.abs(a - b), self.denominator)
+
+
+class StatisticalRelation:
+    def __init__(self):
+        self.std_dev = None
+
+    def initialise(self, data:np.ndarray):
+        self.std_dev = np.std(data)
+
+    def get_value(self, a: float, b: float) -> float:
+        return max(min((a - b)/self.std_dev, (b - a)/self.std_dev) + 1, 0)
