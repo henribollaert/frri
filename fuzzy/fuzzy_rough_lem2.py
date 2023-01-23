@@ -2,7 +2,7 @@ from fuzzy.classes import *
 from fuzzy import fuzzy_lem2
 
 
-# todo why are R_av and such calculated multiple times?
+# todo why are R_av and such defined multiple times?
 
 def R_av(S, a, v, x):
     # Calculate R_a^v(x) given a decision system S, attribute-value pair (a, v) and case x.

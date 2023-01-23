@@ -5,7 +5,7 @@ from pathlib import Path
 from fuzzy.utilities import get_cases
 
 # Parameters
-N = 5
+N = 10
 '''
 The amount of parts for cross-validation: (N-1)/Nth of the dataset will 
 be used for training and the other part for testing

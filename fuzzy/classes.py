@@ -80,13 +80,13 @@ class DecisionSystem:
     implicator = FuzzySet.implicator_kd
 
     def __init__(self):
-        self.cases = [] # cases
-        self.n_cases = 0 # amount of cases
-        self.labels = [] # labels of each attribute
-        self.attributes = set() # set of attributes (excluding decision attribute)
-        self.decision = None # decision attribute
-        self.decision_values = set() # set of all possible values for the decision attribute
-        self.concepts = {} # dict of concepts, where keys are the values and self.concepts[key] is list of indices
+        self.cases = []  # cases
+        self.n_cases = 0  # amount of cases
+        self.labels = []  # labels of each attribute
+        self.attributes = set()  # set of attributes (excluding decision attribute)
+        self.decision = None  # decision attribute
+        self.decision_values = set()  # set of all possible values for the decision attribute
+        self.concepts = {}  # dict of concepts, where keys are the values and self.concepts[key] is list of indices
         self.fral = False
         self.fcii = False
 
@@ -180,15 +180,7 @@ class DecisionSystem:
         self.cases = cases
         self.decision = len(self.cases[0]) - 1 # Get index of the last entry (which is assumed to be the decision)
         self.fral = first_row_are_labels
-        # if first_row_are_labels:
-        #     self.fral = True
-        # else:
-        #     self.fral = False
         self.fcii = first_column_is_n
-        # if first_column_is_n:
-        #     self.fcii = True
-        # else:
-        #     self.fcii = False
 
         self.setup_variables()
 
@@ -331,6 +323,6 @@ class DecisionSystem:
     def display(self):
         # Displays the decision system as a table
         data = [self.labels] + self.cases
-        col_width = max(len(str(word)) for row in data for word in row) + 2 # padding
+        col_width = max(len(str(word)) for row in data for word in row) + 2  # padding
         for row in data:
             print("".join(str(word).ljust(col_width) for word in row))
