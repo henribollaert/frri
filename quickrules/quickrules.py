@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from quickrules.fuzzy_set import FuzzySet
 import numpy as np
 from typing import Protocol, Optional, TypeVar
+import math
 
 LabelType = TypeVar('LabelType', int, str)
 
@@ -71,7 +72,12 @@ class QuickRules:
     This class needs an attribute based relation, since it is needed in the calculation of the POS region.
     """
 
-    def __init__(self, t_norm: TNorm, implicator: Implicator, relation_factory: RelationFactory):
+    def __init__(
+            self,
+            t_norm: TNorm,
+            implicator: Implicator,
+            relation_factory: RelationFactory
+    ):
         self.t_norm: TNorm = t_norm
         self.implicator: Implicator = implicator
         self.relation_factory: RelationFactory = relation_factory
@@ -85,7 +91,10 @@ class QuickRules:
         self.y: Optional[np.ndarray] = None
 
     def get_info(self):
-        return f"@t-norm: {self.t_norm}\n @implicator: {self.implicator}\n @rel:{self.relation_factory}\n"
+        return f"@t-norm: {self.t_norm}\n@implicator: {self.implicator}\n@rel:{self.relation_factory}\n"
+
+    def get_rules_as_string(self) -> list[str]:
+        return [str(rule) for rule in self.rules]
 
     def fit(self, x: np.ndarray, y: np.ndarray):  # should just use the quick rules algorithm
         # save input
@@ -105,28 +114,37 @@ class QuickRules:
         gamma_b = 0
 
         # main loop
-        while gamma_b < gamma_a:
+        while not math.isclose(gamma_b, gamma_a):
             # temporary additions to B
             temp_gamma = gamma_b
             best_attribute = None
             for attribute in range(self.nr_of_attributes):
-                # we only look at unused attributes
-                if not used_attributes[attribute]:
-                    b_with_a = [_ for _ in used_attributes]
-                    b_with_a[attribute] = True
 
-                    gamma_b_with_a = 0  # we will need to compare this later, and don't need a fuzzy set for this
-                    for sample_index, (sample, label) in enumerate(zip(self.X, self.y)):
-                        membership = self._calculate_single_pos_membership(sample, label, b_with_a)
-                        gamma_b_with_a += membership
-                        # we only look at not fully covered samples
-                        if self.covered.get_membership(sample_index) != pos_a.get_membership(sample_index) and \
-                                membership == pos_a.get_membership(sample_index):
-                            new_rule = self._create_rule(b_with_a, sample, label)
-                            self.check(new_rule)
-                    if gamma_b_with_a > temp_gamma:
-                        best_attribute = attribute
-                        temp_gamma = gamma_b_with_a
+                # we skip the already used attributes
+                if used_attributes[attribute]:
+                    continue
+
+                b_with_a = [_ for _ in used_attributes]
+                b_with_a[attribute] = True
+
+                gamma_b_with_a = 0.0  # we will need to compare this later, and don't need a fuzzy set for this
+                for sample_index, (sample, label) in enumerate(zip(self.X, self.y)):
+                    membership = self._calculate_single_pos_membership(sample, label, b_with_a)
+                    gamma_b_with_a += membership
+
+                    # we skip fully covered samples
+                    if math.isclose(self.covered.get_membership(sample_index),
+                                        pos_a.get_membership(sample_index)):
+                        continue
+
+                    if math.isclose(membership, pos_a.get_membership(sample_index)):
+                        new_rule = self._create_rule(b_with_a, sample, label)
+                        self.check(new_rule)
+                # print(gamma_b_with_a, temp_gamma)
+                if gamma_b_with_a > temp_gamma:
+                    # print('larger')
+                    best_attribute = attribute
+                    temp_gamma = gamma_b_with_a
             # update b with the best one we found
             used_attributes[best_attribute] = True
             gamma_b = temp_gamma
@@ -171,7 +189,7 @@ class QuickRules:
         return self.relation(sample, rule.generating_element, rule.attributes)
 
     def _predict_single(self, sample: np.ndarray) -> LabelType:  # evaluate rules
-        max_value = 0
+        max_value = 0.0
         pred = None
         for rule in self.rules:
             if temp := self._evaluate_rule(sample, rule) > max_value:
@@ -179,10 +197,17 @@ class QuickRules:
                 pred = rule.decision
         return pred
 
+    def _predict_single_combo(self, sample: np.ndarray) -> LabelType:
+        preds = {}
+        for rule in self.rules:
+            preds[rule.decision] = preds.get(rule.decision, 0.0) + self._evaluate_rule(sample, rule)
+        return max(preds, key=preds.get, default=None)
+
     # todo we might want the option to get the firing values for each rule
     def predict(self, x: np.ndarray) -> np.ndarray:
-        result = np.array([self._predict_single(sample) for sample in x])
-        return result
+        # result = np.array([self._predict_single(sample) for sample in x])
+        # return result
+        return np.array([self._predict_single_combo(sample) for sample in x])
 
     def _get_positive_region(self, attributes=None) -> FuzzySet:
         """

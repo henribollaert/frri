@@ -54,6 +54,7 @@ def test_save(model: RuleInductionModel,
               datasets_folder: Path,
               results_folder: Path,
               get_rules: bool = True,
+              print_info: bool = False,
               exclude: Optional[list[str]] = None,
               include: Optional[list[str]] = None,
               verbose: bool = False,
@@ -116,7 +117,8 @@ def test_save(model: RuleInductionModel,
 
             # save the predictions
             with open(fold_result_path / f"fold{fold + 1}.dat", 'w') as f:
-                f.write(model.get_info())
+                if print_info:
+                    f.write(model.get_info())
                 for item in predictions:
                     f.write(f"{item}\n")
 
