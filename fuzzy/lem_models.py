@@ -4,20 +4,19 @@ that follows the Model protocol from quickrules.data_handling
 """
 import numpy as np
 from fuzzy import classes as fc
+from fuzzy.fuzzy_rough_lem2 import FuzzyRoughLEM2
 from typing import Optional
 
 
-class LEMModel:
+class FRLEMModel:
     def __init__(
             self,
-            model,  # this expects a fuzzy_(rough_)lem function
             no_sum=True,
             ming=0.9,
             alpha=1,
             t_norm=fc.FuzzySet.t_norm_min,
             implicator=fc.FuzzySet.implicator_kd
     ):
-        self.model = model
         self.no_sum = no_sum
         self.ming = ming
         self.alpha = alpha
@@ -45,7 +44,7 @@ class LEMModel:
 
     def fit(self, data, labels):
         self._initialisation(data, labels)
-        print('starting rule induction')
+
         # Induce rules from the training data
         self.certain_rules = {}  # Dictionary of certain rules for each concept
         self.possible_rules = {}  # Dictionary of possible rules for each concept
@@ -53,14 +52,13 @@ class LEMModel:
         self.g_cons_cr = {}  # Dictionary of the g-consistency of C' for the certain rules
         self.g_cons_pr = {}  # Dictionary of the g-consistency of C' for the possible rules
         for key, concept in self.decision_system.concepts.items():  # For each concept, induce a set of rules
-            print(key)
             concept = set(concept)
             self.certain_rules[key], self.possible_rules[key], self.g_cons_cr[key], self.g_cons_pr[key] = \
-                self.model(self.decision_system, concept, key, a=self.alpha)
+                FuzzyRoughLEM2(self.decision_system, concept, key, a=self.alpha)
             self.g_cons_C[key] = self.decision_system.g_cons(concept, alpha=self.alpha)
 
     def get_info(self) -> str:
-        return "LEM-model"
+        return "FR-LEM-model"
 
     def _predict_single(self, sample: np.ndarray):
         test_case = sample.tolist() + ['UNKNOWN']

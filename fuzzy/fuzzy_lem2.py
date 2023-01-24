@@ -65,9 +65,9 @@ def FuzzyLEM2(S, C, g):
     local_cover = []
     L_block = [0 for x in range(S.n_cases)] # The grade of covering of each case in S (initially 0)
     G = C # The set of cases that still need covering
-    C_fuzzy = [1 if x in C else 0 for x in range(S.n_cases)] # C_fuzzy[x] = 1 <=> x in C, otherwise C_fuzzy[x] = 0
-    G_fuzzy = [1 if x in C else 0 for x in range(S.n_cases)]
-    weights = [1 if x in C else -1 for x in range(S.n_cases)] # Similar as above, used when removing p from F
+    C_fuzzy = [1 if x in C else 0 for x in range(S.n_cases)]  # C_fuzzy[x] = 1 <=> x in C, otherwise C_fuzzy[x] = 0
+    G_fuzzy = [1 if x in C else 0 for x in range(S.n_cases)]  # todo this is not used???
+    weights = [1 if x in C else -1 for x in range(S.n_cases)]  # Similar as above, used when removing p from F
     # Calculate all values of R_a^v(x) for each t = (a, v) from cases in C and for each x in X
     pairs = [] # List of all pairs of cases in
     R = [] # R[t][x] = R_a^v(x), with t in [0, len(pairs)[ such that pairs[t] = (a, v)
