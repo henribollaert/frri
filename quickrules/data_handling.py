@@ -49,6 +49,17 @@ class RuleInductionModel(Protocol):
         ...
 
 
+def skip(name: str, include: Optional[list[str]], exclude: Optional[list[str]]):
+    """
+    Returns true if the data set should be skipped.
+    :param name:
+    :param include:
+    :param exclude:
+    :return:
+    """
+    return (exclude is not None and name in exclude) or (include is not None and name not in include)
+
+
 # todo finish, also print info and rules!
 def test_save(model: RuleInductionModel,
               datasets_folder: Path,
@@ -83,8 +94,7 @@ def test_save(model: RuleInductionModel,
         short_name = dataset_dir.name[:search(r'\d', dataset_dir.name).start()][:-1]
 
         # skip files if we're using excluded or must_include
-        if (exclude is not None and short_name in exclude) or \
-                (include is not None and short_name not in include):
+        if skip(short_name, include, exclude):
             continue
 
         if verbose:
@@ -132,6 +142,7 @@ def calculate_score(data_folder,
                     results_folder,
                     metric,
                     exclude=None,
+                    include=None,
                     nr_of_folds=10,
                     verbose=False):
     if exclude is None:
@@ -143,7 +154,7 @@ def calculate_score(data_folder,
             continue
         # very dirty, search depends on the fact that the names don't contain underscores
         short_name = dataset_dir.name[:search(r'\d', dataset_dir.name).start()][:-1]
-        if short_name in exclude:
+        if skip(short_name, include, exclude):
             continue
 
         if verbose:
@@ -159,7 +170,7 @@ def calculate_score(data_folder,
             fold_result_path = dataset_result_path / f"fold{fold + 1}"
             if fold_result_path.exists():
                 _, y_test = get_dataset(dataset_dir, f"{fold + 1}tst")
-                predictions = pd.read_csv(fold_result_path / f"{fold + 1}.dat",
+                predictions = pd.read_csv(fold_result_path / f"fold{fold + 1}.dat",
                                           comment='@', header=None)
                 sum_of_metrics += metric(y_test, predictions)
 
