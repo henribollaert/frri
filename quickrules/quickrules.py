@@ -48,7 +48,7 @@ class Rule:
         s = "("
         for nr, (used, value) in enumerate(zip(self.attributes, self.generating_element)):
             if used:
-                s += f"a_{nr+1}={value},"
+                s += f"a_{nr + 1}={value},"
         s += f"decision={self.decision})"
         return s
 
@@ -76,12 +76,16 @@ class QuickRules:
             self,
             t_norm: TNorm,
             implicator: Implicator,
-            relation_factory: RelationFactory
+            relation_factory: RelationFactory,
+            prune: bool = False,
+            combo: bool = True  # signifies the prediction component
     ):
         self.t_norm: TNorm = t_norm
         self.implicator: Implicator = implicator
         self.relation_factory: RelationFactory = relation_factory
         self.relation: Optional[Relation] = None
+        self.prune: bool = prune
+        self.combo: bool = combo
 
         self.rules: Optional[list[Rule]] = None
         self.covered: Optional[FuzzySet] = None
@@ -90,19 +94,22 @@ class QuickRules:
         self.X: Optional[np.ndarray] = None
         self.y: Optional[np.ndarray] = None
 
-    def get_info(self):
+    def get_info(self) -> str:
         return f"@t-norm: {self.t_norm}\n@implicator: {self.implicator}\n@rel:{self.relation_factory}\n"
 
     def get_rules_as_string(self) -> list[str]:
         return [str(rule) for rule in self.rules]
 
-    def fit(self, x: np.ndarray, y: np.ndarray):  # should just use the quick rules algorithm
+    def _init_fit(self, x: np.ndarray, y: np.ndarray) -> None:
         # save input
         self.X = x
         self.nr_of_attributes = x.shape[1]
         self.y = y
 
         self.relation = self.relation_factory.get_relation(x)
+
+    def fit(self, x: np.ndarray, y: np.ndarray) -> None:
+        self._init_fit(x, y)
 
         # initialisation of quick rules
         self.rules = []
@@ -134,7 +141,7 @@ class QuickRules:
 
                     # we skip fully covered samples
                     if math.isclose(self.covered.get_membership(sample_index),
-                                        pos_a.get_membership(sample_index)):
+                                    pos_a.get_membership(sample_index)):
                         continue
 
                     if math.isclose(membership, pos_a.get_membership(sample_index)):
@@ -148,8 +155,33 @@ class QuickRules:
             # update b with the best one we found
             used_attributes[best_attribute] = True
             gamma_b = temp_gamma
+        if self.prune:
+            self._prune()
 
-    def check(self, rule_to_check: Rule):
+    def _prune(self) -> None:
+        """
+        This method prunes the rules after fitting by trying to remove each rule from the
+        ruleset and doing so when all elements are still covered.
+        """
+        to_remove = []
+        for rule_to_check in self.rules:
+            for i, x in enumerate(self.X):
+                for other_rule in self.rules:
+                    if rule_to_check == other_rule:
+                        continue
+                    if math.isclose(other_rule.coverage.get_membership(i), 1.0):  # we use the index!
+                        break
+                else:
+                    # this sample was not covered by any other rule
+                    break
+            else:
+                # the above loop never encountered a break: all samples were fully covered
+                # by another rule -> we can remove this rule
+                to_remove.append(rule_to_check)
+
+        self.rules = [rule for rule in self.rules if rule not in to_remove]
+
+    def check(self, rule_to_check: Rule) -> None:
         # first we check if the new rule will increase the coverage of at least one element
         add = True
         to_remove = []
@@ -185,7 +217,7 @@ class QuickRules:
         # now we have all required parameters
         return Rule(attributes, generating_element, decision, coverage)
 
-    def _evaluate_rule(self, sample, rule):
+    def _evaluate_rule(self, sample, rule) -> float:
         return self.relation(sample, rule.generating_element, rule.attributes)
 
     def _predict_single(self, sample: np.ndarray) -> LabelType:  # evaluate rules
@@ -198,16 +230,17 @@ class QuickRules:
         return pred
 
     def _predict_single_combo(self, sample: np.ndarray) -> LabelType:
-        preds = {}
+        predictions = {}
         for rule in self.rules:
-            preds[rule.decision] = preds.get(rule.decision, 0.0) + self._evaluate_rule(sample, rule)
-        return max(preds, key=preds.get, default=None)
+            predictions[rule.decision] = predictions.get(rule.decision, 0.0) + self._evaluate_rule(sample, rule)
+        return max(predictions, key=predictions.get, default=None)
 
     # todo we might want the option to get the firing values for each rule
     def predict(self, x: np.ndarray) -> np.ndarray:
-        # result = np.array([self._predict_single(sample) for sample in x])
-        # return result
-        return np.array([self._predict_single_combo(sample) for sample in x])
+        if self.combo:
+            return np.array([self._predict_single_combo(sample) for sample in x])
+        else:
+            return np.array([self._predict_single(sample) for sample in x])
 
     def _get_positive_region(self, attributes=None) -> FuzzySet:
         """
