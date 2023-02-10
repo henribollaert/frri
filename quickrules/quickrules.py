@@ -18,13 +18,19 @@ class Implicator(Protocol):
 
 
 class Relation(Protocol):
-
+    """
+    A relation takes two samples and a list of booleans, where True indicates that the corresponding
+    attribute should be used.
+    It then returns the degree of relation of those two samples w.r.t. those attributes.
+    """
     def __call__(self, a: np.ndarray, b: np.ndarray, attributes: list[bool]) -> float:
         ...
 
 
 class RelationFactory(Protocol):
-
+    """
+    A RelationFactory returns a Relation that is normalized for the input data.
+    """
     def get_relation(self, data: np.ndarray) -> Relation:
         ...
 
@@ -40,9 +46,9 @@ class Rule:
     its coverage is left to the QuickRules class.
     """
     attributes: list[bool]  # set of conditional attributes in the rule's antecedent
-    generating_element: np.ndarray  # fuzzy tolerance class of the object that generated the rule
+    generating_element: np.ndarray  # the element that generated this rule
     decision: LabelType  # the decision class/consequent of the rule. type depends on the data set
-    coverage: FuzzySet
+    coverage: FuzzySet  # fuzzy tolerance class of the object that generated the rule
 
     def __str__(self):
         s = "("
@@ -68,8 +74,10 @@ class Rule:
 
 class QuickRules:
     """
+    Implementation of the QuickRules algorithm from [1], with an added pruning step.
 
-    This class needs an attribute based relation, since it is needed in the calculation of the POS region.
+    [1] Jensen, Richard & Cornelis, Chris & Shen, Qiang. (2009). Hybrid Fuzzy-Rough Rule Induction and
+        Feature Selection. IEEE International Conference on Fuzzy Systems. 1151 - 1156. 10.1109/FUZZY.2009.5277058.
     """
 
     def __init__(
@@ -78,8 +86,16 @@ class QuickRules:
             implicator: Implicator,
             relation_factory: RelationFactory,
             prune: bool = False,
-            combo: bool = True  # signifies the prediction component
+            combo: bool = True
     ):
+        """
+        Initialisation of a QuickRules object. Sets the hyperparameters of the algorithm
+        :param t_norm: t-norm used in aggregation of the attribute-based relation and the
+        :param implicator: implicator used for calculating the lower approximation
+        :param relation_factory: factory that can return relation objects that take into account the training data
+        :param prune: toggles pruning on or off
+        :param combo: selects the prediction method
+        """
         self.t_norm: TNorm = t_norm
         self.implicator: Implicator = implicator
         self.relation_factory: RelationFactory = relation_factory
@@ -101,7 +117,12 @@ class QuickRules:
         return [str(rule) for rule in self.rules]
 
     def _init_fit(self, x: np.ndarray, y: np.ndarray) -> None:
-        # save input
+        """
+        Initialises the data containing members and relation of this object before starting the rule induction.
+        :param x: numerical data
+        :param y: labels
+        :return: nothing
+        """
         self.X = x
         self.nr_of_attributes = x.shape[1]
         self.y = y
@@ -109,6 +130,13 @@ class QuickRules:
         self.relation = self.relation_factory.get_relation(x)
 
     def fit(self, x: np.ndarray, y: np.ndarray) -> None:
+        """
+        Creates a set of rules using the QuickRules algorithm on the data set (x,y), where x contains the
+        conditional attributes of the samples and y contains their labels.
+        :param x: numerical data
+        :param y: labels
+        :return: nothing
+        """
         self._init_fit(x, y)
 
         # initialisation of quick rules
@@ -122,7 +150,7 @@ class QuickRules:
 
         # main loop
         while not math.isclose(gamma_b, gamma_a):
-            # temporary additions to B
+            # temporary additions to B: we will greedily look for the best attribute to add
             temp_gamma = gamma_b
             best_attribute = None
             for attribute in range(self.nr_of_attributes):
@@ -147,14 +175,14 @@ class QuickRules:
                     if math.isclose(membership, pos_a.get_membership(sample_index)):
                         new_rule = self._create_rule(b_with_a, sample, label)
                         self.check(new_rule)
-                # print(gamma_b_with_a, temp_gamma)
                 if gamma_b_with_a > temp_gamma:
-                    # print('larger')
                     best_attribute = attribute
                     temp_gamma = gamma_b_with_a
-            # update b with the best one we found
+            # update b with the best attribute
             used_attributes[best_attribute] = True
             gamma_b = temp_gamma
+
+        # after the rule induction with QuickRules, we can end with an optional pruning step.
         if self.prune:
             self._prune()
 
@@ -182,6 +210,13 @@ class QuickRules:
         self.rules = [rule for rule in self.rules if rule not in to_remove]
 
     def check(self, rule_to_check: Rule) -> None:
+        """
+        Checks whether we should add the given rule to the set of rules.
+        Can also result in the removal of rules if their coverage is a subset of the coverage
+        of this rule.
+        :param rule_to_check: new candidate rule
+        :return: nothing
+        """
         # first we check if the new rule will increase the coverage of at least one element
         add = True
         to_remove = []
@@ -203,10 +238,10 @@ class QuickRules:
         """
         Creates a rule defined by the given attributes, generating element and decision class.
         We calculate the coverage of the rule in the training set during creation
-        :param attributes:  attributes used in the antecedent of the rule
-        :param generating_element:  element which holds the values for those attributes
-        :param decision:  decision class of the consequent
-        :return:  a new rule
+        :param attributes: attributes used in the antecedent of the rule
+        :param generating_element: element which holds the values for those attributes
+        :param decision: decision class of the consequent
+        :return: a new rule
         """
         # first we calculate the coverage
         coverage = FuzzySet()
@@ -218,35 +253,92 @@ class QuickRules:
         return Rule(attributes, generating_element, decision, coverage)
 
     def _evaluate_rule(self, sample, rule) -> float:
+        """
+        Evaluates a given rule on a given sample by calculating the firing value of the rule, which is
+        given by the relationship degree between the generating element of the rule and the new sample w.r.t.
+        the attributes of the rule.
+        :param sample: new sample to test
+        :param rule: rule to evaluate
+        :return: firing value of the rule
+        """
         return self.relation(sample, rule.generating_element, rule.attributes)
 
-    def _predict_single(self, sample: np.ndarray) -> LabelType:  # evaluate rules
-        max_value = 0.0
-        pred = None
-        for rule in self.rules:
-            if temp := self._evaluate_rule(sample, rule) > max_value:
-                max_value = temp
-                pred = rule.decision
-        return pred
-
-    def _predict_single_combo(self, sample: np.ndarray) -> LabelType:
-        predictions = {}
-        for rule in self.rules:
-            predictions[rule.decision] = predictions.get(rule.decision, 0.0) + self._evaluate_rule(sample, rule)
+    def _predict_single(self, sample: np.ndarray) -> LabelType:
+        """
+        Returns the class with the highest firing rule for a given sample.
+        :param sample: np.array containing the conditional attributes of the sample
+        :return: prediction
+        """
+        predictions = self._predict_proba_single(sample)
         return max(predictions, key=predictions.get, default=None)
 
-    # todo we might want the option to get the firing values for each rule
+    def _predict_single_combo(self, sample: np.ndarray) -> LabelType:
+        """
+        Returns the class for which the total sum of all the firing rates of its rules is the highest.
+        :param sample: np.array containing the conditional attributes of the sample
+        :return: prediction
+        """
+        predictions = self._predict_proba_single_combo(sample)
+        return max(predictions, key=predictions.get, default=None)
+
     def predict(self, x: np.ndarray) -> np.ndarray:
-        if self.combo:
-            return np.array([self._predict_single_combo(sample) for sample in x])
-        else:
-            return np.array([self._predict_single(sample) for sample in x])
+        """
+        Returns the most likely class for each sample in the two-dimensional array x containing the
+        conditional attributes of each sample.
+        :param x: numpy array of samples
+        :return: numpy array of predictions
+        """
+        return np.array([max(predictions, key=predictions.get, default=None)
+                         for predictions in self.predict_proba(x)])
+
+    @staticmethod
+    def _normalise_dict(d: dict) -> dict:
+        """
+        Helper function that normalises the values of a dict such that their sum will be 1.
+        :param d: dict to normalise
+        :return: normalised dict
+        """
+        return {k: v / sum(d.values()) for k, v in d.items()}
+
+    def _predict_proba_single(self, sample: np.ndarray) -> dict[(LabelType, float)]:
+        """
+        Returns probabilities of this sample belonging to each class based on the highest firing rule for that sample.
+        :param sample: np.array containing the conditional attributes of the sample
+        :return: prediction
+        """
+        max_values = {}
+        for rule in self.rules:
+            max_values[rule.decision] = max(max_values.get(rule.decision, 0.0), self._evaluate_rule(sample, rule))
+        return self._normalise_dict(max_values)
+
+    def _predict_proba_single_combo(self, sample: np.ndarray) -> dict[(LabelType, float)]:
+        """
+        Returns the probability of the sample belonging to each class based on the total sum of
+        all the firing rates of each rule.
+        :param sample: np.array containing the conditional attributes of the sample
+        :return: prediction
+        """
+        total_values = {}
+        for rule in self.rules:
+            total_values[rule.decision] = total_values.get(rule.decision, 0.0) + self._evaluate_rule(sample, rule)
+        return self._normalise_dict(total_values)
+
+    def predict_proba(self, x: np.ndarray) -> np.ndarray:
+        """
+        Returns a dictionary of classes and probabilities for each sample in the two-dimensional array x of samples.
+        :param x: two-dimensional of samples whose classes we want to predict
+        :return: np array of dicts, one for each element in x, containing the
+                 probability of that element belonging to each class
+        """
+        return np.array([self._predict_proba_single_combo(sample) if self.combo else self._predict_proba_single(sample)
+                         for sample in x])
 
     def _get_positive_region(self, attributes=None) -> FuzzySet:
         """
         Calculates the positive region for the given set of attributes. If attributes is none,
         all attributes are used.
         :param attributes:  boolean array corresponding to the selected attributes
+        :return: the positive region as a fuzzy set, where the samples of x are represented by their index
         """
         if attributes is None:
             attributes = [True] * self.nr_of_attributes
