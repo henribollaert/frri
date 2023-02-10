@@ -145,6 +145,17 @@ def calculate_score(data_folder,
                     include=None,
                     nr_of_folds=10,
                     verbose=False):
+    """
+    This method returns the average value of the metric on each data set in the data folder.
+    :param data_folder:
+    :param results_folder:
+    :param metric:
+    :param exclude:
+    :param include:
+    :param nr_of_folds:
+    :param verbose:
+    :return:
+    """
     if exclude is None:
         exclude = ['abalone']
     scores = {}
@@ -164,6 +175,7 @@ def calculate_score(data_folder,
 
         # create dictionaries to save results of this dataset
         sum_of_metrics = 0
+        successful_folds = 0
         for fold in range(nr_of_folds):
 
             # create the folder for the results on this fold of the dataset
@@ -172,9 +184,51 @@ def calculate_score(data_folder,
                 _, y_test = get_dataset(dataset_dir, f"{fold + 1}tst")
                 predictions = pd.read_csv(fold_result_path / f"fold{fold + 1}.dat",
                                           comment='@', header=None)
-                sum_of_metrics += metric(y_test, predictions)
+                try:
+                    sum_of_metrics += metric(y_test, predictions)
+                except TypeError:
+                    print(f"Unsuccessful for fold{fold + 1} on {short_name}.")
+                else:
+                    successful_folds += 1
 
         # add scores to the dictionary
-        scores[short_name] = sum_of_metrics / nr_of_folds
+        scores[short_name] = sum_of_metrics / successful_folds if successful_folds > 0 else '-'
 
     return scores
+
+
+def count_all_rules(results_folder,
+                    exclude=None,
+                    include=None,
+                    nr_of_folds=10,
+                    verbose=False):
+    if exclude is None:
+        exclude = ['abalone']
+    amount_of_rules = {}
+    for dataset_dir in results_folder.iterdir():
+        if dataset_dir.name[0] == "." or skip(dataset_dir.name, include, exclude):
+            continue
+
+        if verbose:
+            print(dataset_dir.name)
+
+        dataset_result_path = results_folder / dataset_dir.name
+
+        # create dictionaries to save results of this dataset
+        sum_of_rules = 0
+        for fold in range(nr_of_folds):
+            # look up the folder for the results on this fold of the dataset
+            sum_of_rules += count_rules(
+                dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}.dat"
+            )
+
+        # add scores to the dictionary
+        amount_of_rules[dataset_dir.name] = sum_of_rules / nr_of_folds
+
+    return amount_of_rules
+
+
+def count_rules(file):
+    with open(file, 'r') as f:
+        amount = len(f.readlines())
+    return amount
