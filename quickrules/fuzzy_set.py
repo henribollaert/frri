@@ -5,6 +5,10 @@ from dataclasses import dataclass, field
 
 @dataclass
 class FuzzySet:
+    """
+    Class representing a fuzzy set for the quickrules package, where elements are identified by their index in the
+    training set.
+    """
     memberships: dict[int, float] = field(default_factory=dict)
 
     def get_size(self) -> float:
@@ -13,7 +17,7 @@ class FuzzySet:
     def get_membership(self, element: int) -> float:
         return self.memberships.get(element, 0.0)
 
-    def add(self, element, membership_degree) -> None:
+    def add(self, element: int, membership_degree: float) -> None:
         self.memberships[element] = membership_degree
 
     def union(self, other: FuzzySet) -> FuzzySet:

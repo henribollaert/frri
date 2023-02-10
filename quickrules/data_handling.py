@@ -6,23 +6,19 @@ import os
 import numpy as np
 
 
-def get_dataset(folder_path, keyword, remove_cat=True):
+def get_dataset(folder_path: Path, keyword: str, remove_cat: bool = True):
     """
     Returns a dataset from a specified folder with a given keyword in the name, possibly after removing categorical
     features.
 
-    Parameters
-    ----------
-    folder_path path to folder of the dataset
-    keyword     keyword [d*]tra or [d*]tst
-    remove_cat  remove categorical features, yes or no?
+    :param folder_path: path to folder of the dataset
+    :param keyword:     keyword [d*]tra or [d*]tst
+    :param remove_cat:  remove categorical features, yes or no?
 
-    Returns
-    -------
-    tuple containing numpy array containing x values, numpy array containing y values
+    :return: tuple containing numpy array containing x values, numpy array containing y values
     """
     set_list = [_ for _ in folder_path.iterdir() if keyword in _.name]
-    assert len(set_list) == 1, f'{ len(set_list)} files with {keyword} in their name.'
+    assert len(set_list) == 1, f'{len(set_list)} files with {keyword} in their name.'
 
     dataset = pd.read_csv(set_list[0], header=None, comment='@')
     if remove_cat:
@@ -52,38 +48,39 @@ class RuleInductionModel(Protocol):
 def skip(name: str, include: Optional[list[str]], exclude: Optional[list[str]]):
     """
     Returns true if the data set should be skipped.
-    :param name:
-    :param include:
-    :param exclude:
-    :return:
+    :param name: name of the data set
+    :param include: collection of names of data sets that should be included, or None
+    :param exclude: collection of names of data sets that should be excluded, or None
+    :return: True if the data set should be skipped
     """
     return (exclude is not None and name in exclude) or (include is not None and name not in include)
 
 
 # todo finish, also print info and rules!
-def test_save(model: RuleInductionModel,
-              datasets_folder: Path,
-              results_folder: Path,
-              get_rules: bool = True,
-              print_info: bool = False,
-              exclude: Optional[list[str]] = None,
-              include: Optional[list[str]] = None,
-              verbose: bool = False,
-              nr_of_folds: int = 10
-              ):
+def test_save(
+        model: RuleInductionModel,
+        datasets_folder: Path,
+        results_folder: Path,
+        get_rules: bool = True,
+        print_info: bool = False,
+        exclude: Optional[list[str]] = None,
+        include: Optional[list[str]] = None,
+        verbose: bool = False,
+        nr_of_folds: int = 10
+) -> None:
     """
     This method runs a given model on a collection of data sets and saves the predictions
     in the given path.
 
-    :param model:
-    :param datasets_folder:
-    :param results_folder:
-    :param get_rules:
-    :param exclude:
-    :param include:
-    :param verbose:
-    :param nr_of_folds:
-    :return:
+    :param model: model to test
+    :param datasets_folder: folder containing the data sets
+    :param results_folder: folder where the results should be saved
+    :param get_rules: should we save the rules?
+    :param exclude: list of data sets to exclude
+    :param include: list of data sets to include
+    :param verbose: should we print the name of the data set we are testing on?
+    :param nr_of_folds: number of folds for the cross-validation
+    :return: Nothing
     """
     for dataset_dir in datasets_folder.iterdir():
         # skip .gitignore files
@@ -138,23 +135,23 @@ def test_save(model: RuleInductionModel,
                         f.write(f"{item}\n")
 
 
-def calculate_score(data_folder,
-                    results_folder,
+def calculate_score(data_folder: Path,
+                    results_folder: Path,
                     metric,
-                    exclude=None,
-                    include=None,
-                    nr_of_folds=10,
-                    verbose=False):
+                    exclude: Optional[list[str]] = None,
+                    include: Optional[list[str]] = None,
+                    nr_of_folds: int = 10,
+                    verbose: bool = False) -> dict[str, float]:
     """
     This method returns the average value of the metric on each data set in the data folder.
-    :param data_folder:
-    :param results_folder:
-    :param metric:
-    :param exclude:
-    :param include:
-    :param nr_of_folds:
-    :param verbose:
-    :return:
+    :param data_folder: folder containing the data sets
+    :param results_folder: folder containing the results
+    :param metric: metric to use
+    :param exclude: data sets to exclude
+    :param include: data sets to include
+    :param nr_of_folds: number of folds of the cross-validation
+    :param verbose: should we print the name of the data set on which we are calculating the score?
+    :return: dictionary containing the average score on each data set
     """
     if exclude is None:
         exclude = ['abalone']
@@ -197,11 +194,20 @@ def calculate_score(data_folder,
     return scores
 
 
-def count_all_rules(results_folder,
-                    exclude=None,
-                    include=None,
-                    nr_of_folds=10,
-                    verbose=False):
+def count_all_rules(results_folder: Path,
+                    exclude: Optional[list[str]] = None,
+                    include: Optional[list[str]] = None,
+                    nr_of_folds: int = 10,
+                    verbose: bool = False) -> dict[str, float]:
+    """
+    Counts the rules generated for achieving the results in the results folder
+    :param results_folder: path to the folder folder containing the results and the rules
+    :param exclude: data sets to exclude
+    :param include: data sets to inculde
+    :param nr_of_folds: number of folds used in cross-validation
+    :param verbose: should we print the name of the data set on which we are counting the rules?
+    :return: dictionary of the average number of rules for each data set
+    """
     if exclude is None:
         exclude = ['abalone']
     amount_of_rules = {}
@@ -228,7 +234,12 @@ def count_all_rules(results_folder,
     return amount_of_rules
 
 
-def count_rules(file):
+def count_rules(file: Path) -> int:
+    """
+    Counts the number of rules (i.e. lines) in a file
+    :param file: path to the file containing the rules
+    :return: number of rules
+    """
     with open(file, 'r') as f:
         amount = len(f.readlines())
     return amount

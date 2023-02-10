@@ -1,3 +1,8 @@
+"""
+File containing fuzzy operators
+"""
+
+
 class MinTNorm:
     def __call__(self, a, b):
         return min(a, b)
