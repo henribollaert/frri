@@ -4,7 +4,7 @@ from quickrules.weights import Weights
 
 class OWAQuickRules(QuickRules):
     """
-    Variant of quickrules that uses the OWA-based fuzzy rough lower approximation.
+    Variant of QuickRules that uses the OWA-based fuzzy rough lower approximation.
     """
     def __init__(
             self,
@@ -24,7 +24,7 @@ class OWAQuickRules(QuickRules):
 
     def _init_fit(self, x: np.ndarray, y: np.ndarray):
         super()._init_fit(x, y)
-        self.weights = self.weight_function(self.X.shape[0])  # weights are descending
+        self.weights = self.weight_function(self.X.shape[0])
 
     def _calculate_single_pos_membership(self,
                                          sample: np.ndarray,

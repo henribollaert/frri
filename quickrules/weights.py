@@ -24,7 +24,7 @@ import numpy as np
 
 __all__ = [
     'Weights', 'ConstantWeights', 'ExponentialWeights', 'LinearWeights',
-    'QuantifierWeights', 'ReciprocallyLinearWeights',
+    'QuantifierWeights', 'ReciprocallyLinearWeights', 'TruncatedWeights'
 ]
 
 
@@ -169,18 +169,12 @@ class ReciprocallyLinearWeights(Weights):
 
 
 @dataclass
-class TruncatedLinearWeights(Weights):
-    m: int
-
-    def __call__(self, k: int):
-        v = min(k, self.m)
-        return np.flip(2 * np.arange(1, v + 1) / (v * (v + 1)))
-
-
-@dataclass
 class TruncatedWeights(Weights):
+    """
+    Takes a different Weights function and gives it a maximum length.
+    """
     weights: Weights
     cut_off: int
 
-    def __call__(self, k:int):
+    def __call__(self, k: int):
         return self.weights(min(self.cut_off, k))
