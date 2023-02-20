@@ -1,4 +1,4 @@
-# fuzzy-rough-rules
+# Fuzzy rough rule induction
 
 This repository contains the implementations of the following rule
 induction algorithms:
