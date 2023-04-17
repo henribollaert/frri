@@ -90,7 +90,7 @@ class QuickRules:
     ):
         """
         Initialisation of a QuickRules object. Sets the hyperparameters of the algorithm
-        :param t_norm: t-norm used in aggregation of the attribute-based relation and the
+        :param t_norm: t-norm used in aggregation of the attribute-based relation and the # todo wordt eigenlijk niet gebruikt
         :param implicator: implicator used for calculating the lower approximation
         :param relation_factory: factory that can return relation objects that take into account the training data
         :param prune: toggles pruning on or off
@@ -178,7 +178,13 @@ class QuickRules:
                 if gamma_b_with_a > temp_gamma:
                     best_attribute = attribute
                     temp_gamma = gamma_b_with_a
-            # update b with the best attribute
+
+            # update b with the best attribute, if possible
+            if best_attribute is None:
+                print(f"No best attribute found! Gamma_b is {gamma_b}, while Gamma_a is {gamma_a}. Used attributes are:")
+                print(used_attributes)
+                break
+
             used_attributes[best_attribute] = True
             gamma_b = temp_gamma
 
