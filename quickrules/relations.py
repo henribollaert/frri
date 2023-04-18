@@ -35,7 +35,7 @@ class Relation:
 @dataclass
 class RelationFactory:
     attribute_relation_type: Type[AttributeRelation]
-    t_norm: TNorm
+    t_norm: TNorm # todo is eigenlijk aggregator
 
     def get_relation(self, data: np.ndarray) -> Relation:
         attribute_relations = []
