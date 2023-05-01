@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import Optional, Protocol
+from typing import Optional, Protocol, Tuple
 from pathlib import Path
 from re import search
 import os
@@ -31,8 +31,16 @@ def get_dataset(folder_path: Path, keyword: str, remove_cat: bool = True):
     return x_dataset.values, y_dataset.values
 
 
+def get_dataset_dtypes(folder_path: Path, keyword: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
+    set_list = [_ for _ in folder_path.iterdir() if keyword in _.name]
+    assert len(set_list) == 1, f'{len(set_list)} files with {keyword} in their name.'
+
+    dataset = pd.read_csv(set_list[0], header=None, comment='@')
+    return dataset.iloc[:, :-1].values, dataset.iloc[:, -1].values, dataset.dtypes.values
+
+
 class RuleInductionModel(Protocol):
-    def fit(self, data, labels):
+    def fit(self, data, labels, types):
         ...
 
     def get_info(self) -> str:
@@ -108,15 +116,15 @@ def test_save(
                 os.makedirs(fold_result_path)
 
             # get the train and test sets
-            x_train, y_train = get_dataset(dataset_dir, f"{fold + 1}tra")
-            x_test, y_test = get_dataset(dataset_dir, f"{fold + 1}tst")
+            x_train, y_train, t_train = get_dataset_dtypes(dataset_dir, f"{fold + 1}tra")
+            x_test, y_test, _ = get_dataset_dtypes(dataset_dir, f"{fold + 1}tst")
 
             # skip if we already have results for these parameters
             if (fold_result_path / f"fold{fold + 1}.dat").is_file():
                 continue
 
             # create the rules
-            model.fit(x_train, y_train)
+            model.fit(x_train, y_train, t_train)
 
             # query on the test set
             predictions = model.predict(x_test)

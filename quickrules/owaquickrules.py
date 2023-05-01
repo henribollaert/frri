@@ -22,8 +22,8 @@ class OWAQuickRules(QuickRules):
     def get_info(self) -> str:
         return "@owa-quickrules\n" + super().get_info()
 
-    def _init_fit(self, x: np.ndarray, y: np.ndarray):
-        super()._init_fit(x, y)
+    def _init_fit(self, x: np.ndarray, y: np.ndarray, t: np.ndarray):
+        super()._init_fit(x, y, t)
         self.weights = self.weight_function(self.X.shape[0])
 
     def _calculate_single_pos_membership(self,

@@ -116,28 +116,30 @@ class QuickRules:
     def get_rules_as_string(self) -> list[str]:
         return [str(rule) for rule in self.rules]
 
-    def _init_fit(self, x: np.ndarray, y: np.ndarray) -> None:
+    def _init_fit(self, x: np.ndarray, y: np.ndarray, t: np.ndarray) -> None:
         """
         Initialises the data containing members and relation of this object before starting the rule induction.
         :param x: numerical data
         :param y: labels
+        :param t: datatypes of each feature
         :return: nothing
         """
         self.X = x
         self.nr_of_attributes = x.shape[1]
         self.y = y
 
-        self.relation = self.relation_factory.get_relation(x)
+        self.relation = self.relation_factory.get_relation(x, t)
 
-    def fit(self, x: np.ndarray, y: np.ndarray) -> None:
+    def fit(self, x: np.ndarray, y: np.ndarray, t: np.ndarray) -> None:
         """
         Creates a set of rules using the QuickRules algorithm on the data set (x,y), where x contains the
         conditional attributes of the samples and y contains their labels.
         :param x: numerical data
         :param y: labels
+        :param t: datatypes of each feature
         :return: nothing
         """
-        self._init_fit(x, y)
+        self._init_fit(x, y, t)
 
         # initialisation of quick rules
         self.rules = []
@@ -304,7 +306,10 @@ class QuickRules:
         :param d: dict to normalise
         :return: normalised dict
         """
-        return {k: v / sum(d.values()) for k, v in d.items()}
+        div = sum(d.values())
+        if div == 0:  # to avoid diving by 0
+            return d
+        return {k: v / div for k, v in d.items()}
 
     def _predict_proba_single(self, sample: np.ndarray) -> dict[(LabelType, float)]:
         """
