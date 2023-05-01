@@ -69,7 +69,7 @@ class AverageRelation:
 
 
 @dataclass
-class RelationFactory:
+class AverageRelationFactory:
     numerical_relation_type: Type[AttributeRelation[float]]
     categorical_relation_type: Type[AttributeRelation[str]]
 
