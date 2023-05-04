@@ -223,7 +223,7 @@ class RuleGenerator(BaseEstimator):
         return ax
 
     def get_info(self) -> str:
-        return "non-overlap-rules-base"
+        return f"@non-overlap-rules-base\n@scaler: {self.scaler_type()}\n"
 
     def get_rules_as_string(self) -> list[str]:
         self.extract_rules()
