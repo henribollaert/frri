@@ -73,7 +73,8 @@ def test_save(
         exclude: Optional[list[str]] = None,
         include: Optional[list[str]] = None,
         verbose: bool = False,
-        nr_of_folds: int = 10
+        nr_of_folds: int = 10,
+        encode_labels: bool = False
 ) -> None:
     """
     This method runs a given model on a collection of data sets and saves the predictions
@@ -87,6 +88,7 @@ def test_save(
     :param include: list of data sets to include
     :param verbose: should we print the name of the data set we are testing on?
     :param nr_of_folds: number of folds for the cross-validation
+    :param encode_labels: should we encode the labels as ints and save the dict to a file?
     :return: Nothing
     """
     for dataset_dir in datasets_folder.iterdir():
@@ -123,6 +125,19 @@ def test_save(
             if (fold_result_path / f"fold{fold + 1}.dat").is_file():
                 continue
 
+            if encode_labels:
+                # encode the labels to ints
+                classes = list(np.unique(np.append(y_train, y_test)))
+                y_train = np.array([classes.index(label) for label in y_train])
+
+                # save the encoding
+                with open(fold_result_path / f"label_encoding_fold{fold + 1}.npy", 'wb') as f:
+                    np.save(f, classes)
+
+                with open('test.npy', 'wb') as f:
+                    np.save(f, np.array([1, 2]))
+                    np.save(f, np.array([1, 3]))
+
             # create the rules
             model.fit(x_train, y_train, t_train)
 
@@ -136,12 +151,14 @@ def test_save(
                 for item in predictions:
                     f.write(f"{item}\n")
 
+            # save the rules
             if get_rules:
                 with open(fold_result_path / f"rules_fold{fold + 1}.dat", 'w') as f:
                     for item in model.get_rules_as_string():
                         f.write(f"{item}\n")
 
 
+# todo add option for label encoding
 def calculate_score(data_folder: Path,
                     results_folder: Path,
                     metric,

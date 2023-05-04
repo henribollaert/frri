@@ -1,4 +1,3 @@
-#%%
 import numpy as np
 from sklearn.base import BaseEstimator
 import gurobipy as gb
@@ -10,7 +9,6 @@ inf_val = float('Inf')
 import fuzzyroughrules.fuzzy_operators as fo
 import importlib
 importlib.reload(fo)
-#%%
 
 
 class Rule:
@@ -40,10 +38,16 @@ class Rule:
         self.decision = decision
 
 
-#%%
 class RuleGenerator(BaseEstimator):
 
-    def __init__(self, with_reducts=True, tol=1e-4, theta=1):
+    def __init__(
+            self,
+            scaler_type=MinMaxScaler,
+            with_reducts=True,
+            tol=1e-4,
+            theta=1
+    ):
+        self.scaler_type = scaler_type
         self.with_reducts = with_reducts
         self.theta = theta
         self.tol = tol
@@ -98,13 +102,13 @@ class RuleGenerator(BaseEstimator):
 
         return np.array(selected)
 
-    def get_rules(self, X, train_prediction):
-        self.X = np.atleast_2d(X)
-        self.train_prediction = train_prediction
+    def fit(self, data, labels, types):  # used to be get_rules *hb
+        self.X = np.atleast_2d(data)
+        self.train_prediction = labels
         self.n_samples = self.X.shape[0]
         self.n_attributes = self.X.shape[1]
-        self.n_classes = len(np.unique(train_prediction))
-        self.scaler = MinMaxScaler()
+        self.n_classes = len(np.unique(labels))
+        self.scaler = self.scaler_type()
         self.scaler.fit(self.X)
         self.X_scaled = self.scaler.transform(self.X)
         self.rel_matrix_x = fo.triangular_similarity(self.X_scaled, self.X_scaled)
@@ -146,7 +150,8 @@ class RuleGenerator(BaseEstimator):
         for i in self.selected_indexes:
             credibility_predictions[self.train_prediction[i]].append(
                 fo.lukasiewicz_t_norm(fo.general_triangular_relation(X_test, self.X_scaled[i], self.theta, self.reducts[i]), 
-                self.positive_region[i]))
+                self.positive_region[i])
+            )
         cumulative_credibility = []
         for i in range(self.n_classes):
             cumulative_credibility.append(np.max(np.array(credibility_predictions[i]), 0))
@@ -216,3 +221,11 @@ class RuleGenerator(BaseEstimator):
 
             ax.add_patch(rect)
         return ax
+
+    def get_info(self) -> str:
+        return "non-overlap-rules-base"
+
+    def get_rules_as_string(self) -> list[str]:
+        self.extract_rules()
+        return [f"{rule.condition_json}, class: {rule.decision}" for rule in self.rules]
+
