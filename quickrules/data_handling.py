@@ -158,14 +158,15 @@ def test_save(
                         f.write(f"{item}\n")
 
 
-# todo add option for label encoding
 def calculate_score(data_folder: Path,
                     results_folder: Path,
                     metric,
+                    label_encoding: bool = False,
                     exclude: Optional[list[str]] = None,
                     include: Optional[list[str]] = None,
                     nr_of_folds: int = 10,
-                    verbose: bool = False) -> dict[str, float]:
+                    verbose: bool = False
+                    ) -> dict[str, float]:
     """
     This method returns the average value of the metric on each data set in the data folder.
     :param data_folder: folder containing the data sets
@@ -203,6 +204,11 @@ def calculate_score(data_folder: Path,
             fold_result_path = dataset_result_path / f"fold{fold + 1}"
             if fold_result_path.exists():
                 _, y_test = get_dataset(dataset_dir, f"{fold + 1}tst")
+
+                if label_encoding:
+                    classes = list(np.load(str(fold_result_path / f"label_encoding_fold{fold + 1}.npy")))
+                    y_test = np.array([classes.index(label) for label in y_test])
+
                 predictions = pd.read_csv(fold_result_path / f"fold{fold + 1}.dat",
                                           comment='@', header=None)
                 try:
@@ -213,7 +219,7 @@ def calculate_score(data_folder: Path,
                     successful_folds += 1
 
         # add scores to the dictionary
-        scores[short_name] = sum_of_metrics / successful_folds if successful_folds > 0 else '-'
+        scores[short_name] = sum_of_metrics / successful_folds if successful_folds > 0 else np.NaN
 
     return scores
 
