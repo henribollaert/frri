@@ -55,6 +55,10 @@ class RelationFactory:
 
 @dataclass
 class AverageRelation:
+    """
+    This relation uses the monotonic average trick. The normal average is not monotonic and thus
+    can decrease when considering more attributes.
+    """
     attribute_relations: list[AttributeRelation]
 
     def __call__(self, a: np.ndarray, b: np.ndarray, attributes: list[bool] = None) -> float:
@@ -65,6 +69,8 @@ class AverageRelation:
         for val_a, val_b, rel, used in zip(a, b, self.attribute_relations, attributes):
             if used:
                 to_aggregate.append(rel.get_value(val_a, val_b))
+            else:
+                to_aggregate.append(1)
         return np.average(to_aggregate)
 
 

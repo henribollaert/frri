@@ -31,7 +31,7 @@ class RelationFactory(Protocol):
     """
     A RelationFactory returns a Relation that is normalized for the input data.
     """
-    def get_relation(self, data: np.ndarray) -> Relation:
+    def get_relation(self, data: np.ndarray, types: np.ndarray) -> Relation:
         ...
 
 
@@ -234,10 +234,10 @@ class QuickRules:
                 break
             elif rule.coverage.is_subset_of(rule_to_check.coverage):
                 to_remove.append(rule)
+        # if we will add, we remove any rules of which the coverage is a subset of the new rule
+        for rule in to_remove:
+            self.rules.remove(rule)
         if add:
-            # if we will add, we remove any rules of which the coverage is a subset of the new rule
-            for rule in to_remove:
-                self.rules.remove(rule)
             # then we add the rule and update the coverage
             self.rules.append(rule_to_check)
             self.covered = self.covered.union(rule_to_check.coverage)
@@ -373,7 +373,7 @@ class QuickRules:
         if attributes is None:
             attributes = [True] * self.nr_of_attributes
 
-        membership = 1
+        membership = 1  # this is the membership of the sample itself to the lower approx of its class
         for other, other_label in zip(self.X, self.y):
             membership = min(membership,
                              self.implicator(self.relation(sample,

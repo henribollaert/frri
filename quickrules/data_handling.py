@@ -4,6 +4,7 @@ from pathlib import Path
 from re import search
 import os
 import numpy as np
+from sklearn.base import BaseEstimator
 
 
 def get_dataset(folder_path: Path, keyword: str, remove_cat: bool = True):
@@ -74,7 +75,8 @@ def test_save(
         include: Optional[list[str]] = None,
         verbose: bool = False,
         nr_of_folds: int = 10,
-        encode_labels: bool = False
+        encode_labels: bool = False,
+        use_data_types: bool = True,  # todo this can be handled better (* operator?)
 ) -> None:
     """
     This method runs a given model on a collection of data sets and saves the predictions
@@ -134,12 +136,11 @@ def test_save(
                 with open(fold_result_path / f"label_encoding_fold{fold + 1}.npy", 'wb') as f:
                     np.save(f, classes)
 
-                with open('test.npy', 'wb') as f:
-                    np.save(f, np.array([1, 2]))
-                    np.save(f, np.array([1, 3]))
-
             # create the rules
-            model.fit(x_train, y_train, t_train)
+            if use_data_types:
+                model.fit(x_train, y_train, t_train)
+            else:
+                model.fit(x_train, y_train)
 
             # query on the test set
             predictions = model.predict(x_test)
@@ -169,6 +170,7 @@ def calculate_score(data_folder: Path,
                     ) -> dict[str, float]:
     """
     This method returns the average value of the metric on each data set in the data folder.
+    :param label_encoding: do we need to look up the label encoding?
     :param data_folder: folder containing the data sets
     :param results_folder: folder containing the results
     :param metric: metric to use
@@ -210,7 +212,7 @@ def calculate_score(data_folder: Path,
                     y_test = np.array([classes.index(label) for label in y_test])
 
                 predictions = pd.read_csv(fold_result_path / f"fold{fold + 1}.dat",
-                                          comment='@', header=None)
+                                          comment='@', header=None).values
                 try:
                     sum_of_metrics += metric(y_test, predictions)
                 except TypeError:
@@ -231,9 +233,9 @@ def count_all_rules(results_folder: Path,
                     verbose: bool = False) -> dict[str, float]:
     """
     Counts the rules generated for achieving the results in the results folder
-    :param results_folder: path to the folder folder containing the results and the rules
+    :param results_folder: path to the folder containing the results and the rules
     :param exclude: data sets to exclude
-    :param include: data sets to inculde
+    :param include: data sets to include
     :param nr_of_folds: number of folds used in cross-validation
     :param verbose: should we print the name of the data set on which we are counting the rules?
     :return: dictionary of the average number of rules for each data set
@@ -275,19 +277,69 @@ def count_rules(file: Path) -> int:
     return amount
 
 
+def count_all_attributes(results_folder: Path,
+                         exclude: Optional[list[str]] = None,
+                         include: Optional[list[str]] = None,
+                         nr_of_folds: int = 10,
+                         verbose: bool = False) -> dict[str, float]:
+    """
+    Counts the average number of attributes in the rules generated for achieving the results in the results folder
+    :param results_folder: path to the folder containing the results and the rules
+    :param exclude: data sets to exclude
+    :param include: data sets to include
+    :param nr_of_folds: number of folds used in cross-validation
+    :param verbose: should we print the name of the data set on which we are counting the rules?
+    :return: dictionary of the average number of attributes in the rules for each data set
+    """
+    if exclude is None:
+        exclude = ['abalone']
+    amount_of_attributes = {}
+    for dataset_dir in results_folder.iterdir():
+        if dataset_dir.name[0] == "." or skip(dataset_dir.name, include, exclude):
+            continue
+
+        if verbose:
+            print(dataset_dir.name)
+
+        dataset_result_path = results_folder / dataset_dir.name
+
+        # create dictionaries to save results of this dataset
+        sum_of_attributes = 0
+        for fold in range(nr_of_folds):
+            # look up the folder for the results on this fold of the dataset
+            sum_of_attributes += np.average(count_attributes(
+                dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}.dat"
+            ))
+
+        # add scores to the dictionary
+        amount_of_attributes[dataset_dir.name] = sum_of_attributes / nr_of_folds
+
+    return amount_of_attributes
+
+
+def count_attributes(file: Path) -> list[int]:
+    """
+    Counts the number of conditional attributes of each rule in a file.
+    :param file: path to the file containing the rules
+    :return: list containing the number of conditional attributes
+    """
+    with open(file, 'r') as f:
+        nrs = []
+        for line in f.readlines():
+            nrs.append(line.count(','))
+    return nrs
+
+
 def balanced_accuracy_score(y_true: np.ndarray, y_pred: np.ndarray) -> np.float64 | np.ndarray:
     """
     Calculate the balanced accuracy score given the true labels and predicted labels.
+    :param y_true: The true labels.
+    :param y_pred: The predicted labels.
 
-    Parameters:
-    y_true (array-like): The true labels.
-    y_pred (array-like): The predicted labels.
-
-    Returns:
-    float: The balanced accuracy score.
+    :return: The balanced accuracy score.
     """
-    # Convert input to numpy arrays to ensure vectorized operations
     classes = list(np.unique(np.append(y_true, y_pred)))
+
     y_true_prime = np.array([classes.index(label) for label in y_true])
     y_pred_prime = np.array([classes.index(label) for label in y_pred])
 
@@ -304,3 +356,21 @@ def balanced_accuracy_score(y_true: np.ndarray, y_pred: np.ndarray) -> np.float6
     )
 
     return balanced_acc
+
+
+def bold(data, optimum='max', format_string="%.3f"):
+    """
+    Returns a pandas dataframe with formatted strings and bolded maximaL values.
+    :param data:
+    :param optimum:
+    :param format_string:
+
+    :return: data with bolded specified optimum
+    """
+    if optimum == 'max':
+        optima = data != data.max()
+    else:
+        optima = data != data.min()
+    bolded = data.apply(lambda x: "\\textbf{%s}" % format_string % x)
+    formatted = data.apply(lambda x: format_string % x)
+    return formatted.where(optima, bolded)
