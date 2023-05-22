@@ -10,6 +10,7 @@ class FuzzySet:
     training set.
     """
     memberships: dict[int, float] = field(default_factory=dict)
+    t_conorm = max
 
     def get_size(self) -> float:
         return sum(self.memberships.values())
@@ -24,7 +25,8 @@ class FuzzySet:
         elements = set(self.memberships.keys()).union(set(other.memberships.keys()))
         union_memberships = {}
         for element in elements:
-            union_memberships[element] = max(self.memberships.get(element, 0.0), other.memberships.get(element, 0.0))
+            union_memberships[element] = self.t_conorm(self.memberships.get(element, 0.0),
+                                                       other.memberships.get(element, 0.0))
         return FuzzySet(memberships=union_memberships)
 
     def is_subset_of(self, other: FuzzySet) -> bool:
