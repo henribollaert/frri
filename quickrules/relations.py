@@ -83,7 +83,7 @@ class AverageRelationFactory:
         attribute_relations = []
         for column, t in zip(data.T, types):
             rel = self.numerical_relation_type() \
-                if t == np.dtype('float64') else self.categorical_relation_type()
+                if t in [np.dtype('float64'), np.dtype('int64')] else self.categorical_relation_type()
             rel.initialise(column)
             attribute_relations.append(rel)
         return AverageRelation(attribute_relations)
