@@ -6,7 +6,7 @@ from dataclasses import dataclass, field
 @dataclass
 class FuzzySet:
     """
-    Class representing a fuzzy set for the quickrules package, where elements are identified by their index in the
+    Class representing a fuzzy set for the QuickRules package, where elements are identified by their index in the
     training set.
     """
     memberships: dict[int, float] = field(default_factory=dict)
