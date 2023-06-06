@@ -82,26 +82,33 @@ class QuickRules:
 
     def __init__(
             self,
-            t_norm: TNorm,
             implicator: Implicator,
             relation_factory: RelationFactory,
-            prune: bool = False,
-            combo: bool = True
+            relaxation: float = 0.0,
+            tolerance: float = 1e-9,
+            post_prune: bool = False,
+            rule_prune: bool = False,
+            combo: bool = True,
+            verbose: bool = False
     ):
         """
         Initialisation of a QuickRules object. Sets the hyperparameters of the algorithm
-        :param t_norm: t-norm used in aggregation of the attribute-based relation and the # todo wordt eigenlijk niet gebruikt
+        :param relaxation: relaxation parameter (in [0,1]) for the check-condition in [0,1], default: no relaxation.
+        :param tolerance: tolerance parameter on comparing floats, reducing floating point errors, default 1e-9
         :param implicator: implicator used for calculating the lower approximation
         :param relation_factory: factory that can return relation objects that take into account the training data
-        :param prune: toggles pruning on or off
+        :param post_prune: toggles pruning on or off
         :param combo: selects the prediction method
+        :param verbose: output extra information to the general output
         """
-        self.t_norm: TNorm = t_norm
         self.implicator: Implicator = implicator
+        self.relaxation: float = relaxation + tolerance
         self.relation_factory: RelationFactory = relation_factory
         self.relation: Optional[Relation] = None
-        self.prune: bool = prune
+        self.post_prune: bool = post_prune
+        self.rule_prune: bool = rule_prune
         self.combo: bool = combo
+        self.verbose: bool = verbose
 
         self.rules: Optional[list[Rule]] = None
         self.covered: Optional[FuzzySet] = None
@@ -111,7 +118,7 @@ class QuickRules:
         self.y: Optional[np.ndarray] = None
 
     def get_info(self) -> str:
-        return f"@t-norm: {self.t_norm}\n@implicator: {self.implicator}\n@rel:{self.relation_factory}\n"
+        return f"@relaxation: {self.relaxation}\n@implicator: {self.implicator}\n@rel:{self.relation_factory}\n"
 
     def get_rules_as_string(self) -> list[str]:
         return [str(rule) for rule in self.rules]
@@ -174,7 +181,7 @@ class QuickRules:
                                     pos_a.get_membership(sample_index)):
                         continue
 
-                    if math.isclose(membership, pos_a.get_membership(sample_index)):
+                    if membership >= (1.0 - self.relaxation) * pos_a.get_membership(sample_index):
                         new_rule = self._create_rule(b_with_a, sample, label)
                         self.check(new_rule)
                 if gamma_b_with_a > temp_gamma:
@@ -183,7 +190,8 @@ class QuickRules:
 
             # update b with the best attribute, if possible
             if best_attribute is None:
-                print(f"No best attribute found! Gamma_b is {gamma_b}, while Gamma_a is {gamma_a}. Used attributes are:")
+                print(f"No best attribute found! Gamma_b is {gamma_b},"
+                      f" while Gamma_a is {gamma_a}. Used attributes are:")
                 print(used_attributes)
                 break
 
@@ -191,7 +199,7 @@ class QuickRules:
             gamma_b = temp_gamma
 
         # after the rule induction with QuickRules, we can end with an optional pruning step.
-        if self.prune:
+        if self.post_prune:
             self._prune()
 
     def _prune(self) -> None:
@@ -225,6 +233,10 @@ class QuickRules:
         :param rule_to_check: new candidate rule
         :return: nothing
         """
+        # we start by removing attributes from the rule if possible
+        if self.rule_prune:
+            rule_to_check = self._reduce_rule(rule_to_check)
+
         # first we check if the new rule will increase the coverage of at least one element
         add = True
         to_remove = []
@@ -242,7 +254,7 @@ class QuickRules:
             self.rules.append(rule_to_check)
             self.covered = self.covered.union(rule_to_check.coverage)
 
-    def _create_rule(self, attributes, generating_element, decision) -> Rule:
+    def _create_rule(self, attributes: list[bool], generating_element: np.ndarray, decision: LabelType) -> Rule:
         """
         Creates a rule defined by the given attributes, generating element and decision class.
         We calculate the coverage of the rule in the training set during creation
@@ -260,7 +272,7 @@ class QuickRules:
         # now we have all required parameters
         return Rule(attributes, generating_element, decision, coverage)
 
-    def _evaluate_rule(self, sample, rule) -> float:
+    def _evaluate_rule(self, sample: np.ndarray, rule: Rule) -> float:
         """
         Evaluates a given rule on a given sample by calculating the firing value of the rule, which is
         given by the relationship degree between the generating element of the rule and the new sample w.r.t.
@@ -270,6 +282,32 @@ class QuickRules:
         :return: firing value of the rule
         """
         return self.relation(sample, rule.generating_element, rule.attributes)
+
+    def _reduce_rule(self, rule: Rule) -> Rule:
+        """
+        Tries to reduce the number of attributes contained in a rule by
+        :param rule: rule to reduce
+        :return: reduced rule
+        """
+        print('reducing')
+        if sum(rule.attributes) <= 1:  # ignore rules with only 1 attribute
+            return rule
+        new_attributes = [_ for _ in rule.attributes]
+        for index, included in enumerate(rule.attributes):
+            if not included:
+                continue
+            changed_attributes = [_ for _ in new_attributes]
+            changed_attributes[index] = False
+            if self._calculate_single_pos_membership(rule.generating_element, rule.decision, changed_attributes) \
+                    >= (1 - self.relaxation) \
+                    * self._calculate_single_pos_membership(rule.generating_element, rule.decision, new_attributes):
+                new_attributes[index] = False
+                if self.verbose:
+                    print(f"Pruning of rule successful: removed attribute nr {index + 1}")
+                    print(new_attributes)
+                if sum(new_attributes) <= 1:  # never remove the last attribute
+                    break
+        return self._create_rule(new_attributes, rule.generating_element, rule.decision)
 
     def _predict_single(self, sample: np.ndarray) -> LabelType:
         """
@@ -344,7 +382,7 @@ class QuickRules:
         return np.array([self._predict_proba_single_combo(sample) if self.combo else self._predict_proba_single(sample)
                          for sample in x])
 
-    def _get_positive_region(self, attributes=None) -> FuzzySet:
+    def _get_positive_region(self, attributes: Optional[list[bool]] = None) -> FuzzySet:
         """
         Calculates the positive region for the given set of attributes. If attributes is none,
         all attributes are used.

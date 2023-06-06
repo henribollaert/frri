@@ -8,14 +8,26 @@ class OWAQuickRules(QuickRules):
     """
     def __init__(
             self,
-            t_norm: TNorm,
             implicator: Implicator,
             relation_factory: RelationFactory,
             weight_function: Weights,
-            prune: bool = False,
-            combo: bool = True  # signifies the prediction component
+            relaxation: float = 0.0,
+            tolerance: float = 1e-9,
+            post_prune: bool = False,
+            rule_prune: bool = False,
+            combo: bool = True,
+            verbose: bool = False
     ):
-        super().__init__(t_norm, implicator, relation_factory, prune, combo)
+        super().__init__(
+            implicator=implicator,
+            relation_factory=relation_factory,
+            relaxation=relaxation,
+            tolerance=tolerance,
+            post_prune=post_prune,
+            rule_prune=rule_prune,
+            combo=combo,
+            verbose=verbose
+        )
         self.weight_function = weight_function
         self.weights: np.ndarray = Optional[None]
 
