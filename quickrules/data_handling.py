@@ -154,9 +154,9 @@ def test_save(
             else:
                 try:
                     # query on the test set
-                    lines = model.predict(x_test)
+                    lines.extend(model.predict(x_test))
                 except Exception as err:
-                    lines = [f"Error while predicting on fold {fold}.", str(err)]
+                    lines.extend([f"Error while predicting on fold {fold}.", str(err)])
                     if verbose:
                         print(lines)
                 else:
