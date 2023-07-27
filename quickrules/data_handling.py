@@ -1,5 +1,5 @@
 import pandas as pd
-from typing import Optional, Protocol, Tuple
+from typing import Optional, Protocol, Union
 from pathlib import Path
 from re import search
 import os
@@ -7,16 +7,20 @@ import numpy as np
 from sklearn.base import BaseEstimator
 
 
-def get_dataset(folder_path: Path, keyword: str, remove_cat: bool = True):
+def get_dataset(
+        folder_path: Path,
+        keyword: str,
+        remove_cat: bool = False,
+        get_datatypes: bool = False) -> tuple[np.ndarray, ...]:
     """
-    Returns a dataset from a specified folder with a given keyword in the name, possibly after removing categorical
-    features.
-
-    :param folder_path: path to folder of the dataset
-    :param keyword:     keyword [d*]tra or [d*]tst
-    :param remove_cat:  remove categorical features, yes or no?
-
-    :return: tuple containing numpy array containing x values, numpy array containing y values
+    Returns the unique dataset in the folder indicated by folder_path that contains the keyword.
+    Categorical features can be removed, and the datatypes can also be returned
+    :param folder_path: path where the data is located
+    :param keyword: keyword contained in the name of the dataset
+    :param remove_cat: should categorical features be removed (except for the decision attribute)
+    :param get_datatypes: should we return the
+    :return: values of conditional features, values of decision attribute,
+    possibly the datatypes of the conditional features
     """
     set_list = [_ for _ in folder_path.iterdir() if keyword in _.name]
     assert len(set_list) == 1, f'{len(set_list)} files with {keyword} in their name.'
@@ -28,16 +32,11 @@ def get_dataset(folder_path: Path, keyword: str, remove_cat: bool = True):
         x_dataset = dataset.loc[:, nums]
     else:
         x_dataset = dataset.iloc[:, :-1]
-    y_dataset = dataset.iloc[:, -1]
-    return x_dataset.values, y_dataset.values
-
-
-def get_dataset_dtypes(folder_path: Path, keyword: str) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-    set_list = [_ for _ in folder_path.iterdir() if keyword in _.name]
-    assert len(set_list) == 1, f'{len(set_list)} files with {keyword} in their name.'
-
-    dataset = pd.read_csv(set_list[0], header=None, comment='@')
-    return dataset.iloc[:, :-1].values, dataset.iloc[:, -1].values, dataset.dtypes.values
+    if get_datatypes:
+        result = x_dataset.values, dataset.iloc[:, -1].values, x_dataset.dtypes.values
+    else:
+        result = x_dataset.values, dataset.iloc[:, -1].values
+    return result
 
 
 class RuleInductionModel(Protocol):
@@ -114,14 +113,16 @@ def test_save(
             os.makedirs(dataset_result_path)
 
         for fold in range(nr_of_folds):
+            # PRELIMINARIES
+
             # create the folder for the results on this fold of the dataset
             fold_result_path = dataset_result_path / f"fold{fold + 1}"
             if not os.path.exists(fold_result_path):
                 os.makedirs(fold_result_path)
 
             # get the train and test sets
-            x_train, y_train, t_train = get_dataset_dtypes(dataset_dir, f"{fold + 1}tra")
-            x_test, y_test, _ = get_dataset_dtypes(dataset_dir, f"{fold + 1}tst")
+            x_train, y_train, t_train = get_dataset(dataset_dir, f"{fold + 1}tra", get_datatypes=True)
+            x_test, y_test = get_dataset(dataset_dir, f"{fold + 1}tst", get_datatypes=False)
 
             # skip if we already have results for these parameters
             if (fold_result_path / f"fold{fold + 1}.dat").is_file():
@@ -136,26 +137,38 @@ def test_save(
                 with open(fold_result_path / f"label_encoding_fold{fold + 1}.npy", 'wb') as f:
                     np.save(f, classes)
 
-            # create the rules
-            if use_data_types:
-                model.fit(x_train, y_train, t_train)
+            # TRAINING AND PREDICTION
+            lines = []
+            if print_info:
+                lines.append(model.get_info())
+            try:
+                # fit to the training set
+                if use_data_types:
+                    model.fit(x_train, y_train, t_train)
+                else:
+                    model.fit(x_train, y_train)
+            except Exception as err:
+                lines.extend([f"Error while training on fold {fold}.", str(err)])
+                if verbose:
+                    print(lines)
             else:
-                model.fit(x_train, y_train)
-
-            # query on the test set
-            predictions = model.predict(x_test)
-
-            # save the predictions
-            with open(fold_result_path / f"fold{fold + 1}.dat", 'w') as f:
-                if print_info:
-                    f.write(model.get_info())
-                for item in predictions:
-                    f.write(f"{item}\n")
-
-            # save the rules
-            if get_rules:
-                with open(fold_result_path / f"rules_fold{fold + 1}.dat", 'w') as f:
-                    for item in model.get_rules_as_string():
+                try:
+                    # query on the test set
+                    lines = model.predict(x_test)
+                except Exception as err:
+                    lines = [f"Error while predicting on fold {fold}.", str(err)]
+                    if verbose:
+                        print(lines)
+                else:
+                    # save the rules
+                    if get_rules:
+                        with open(fold_result_path / f"rules_fold{fold + 1}.dat", 'w') as f:
+                            for item in model.get_rules_as_string():
+                                f.write(f"{item}\n")
+            finally:
+                # save the predictions
+                with open(fold_result_path / f"fold{fold + 1}.dat", 'w') as f:
+                    for item in lines:
                         f.write(f"{item}\n")
 
 
@@ -280,10 +293,12 @@ def count_rules(file: Path) -> int:
 def count_all_attributes(results_folder: Path,
                          exclude: Optional[list[str]] = None,
                          include: Optional[list[str]] = None,
+                         counter: str = ',',
                          nr_of_folds: int = 10,
                          verbose: bool = False) -> dict[str, float]:
     """
     Counts the average number of attributes in the rules generated for achieving the results in the results folder
+    :param counter: todo def make prettier
     :param results_folder: path to the folder containing the results and the rules
     :param exclude: data sets to exclude
     :param include: data sets to include
@@ -317,16 +332,17 @@ def count_all_attributes(results_folder: Path,
     return amount_of_attributes
 
 
-def count_attributes(file: Path) -> list[int]:
+def count_attributes(file: Path, counter: str = ',') -> list[int]:
     """
     Counts the number of conditional attributes of each rule in a file.
+    :param counter: which string to count
     :param file: path to the file containing the rules
     :return: list containing the number of conditional attributes
     """
     with open(file, 'r') as f:
         nrs = []
         for line in f.readlines():
-            nrs.append(line.count(','))
+            nrs.append(line.count(counter))
     return nrs
 
 
