@@ -2,6 +2,7 @@ from typing import Protocol
 
 import numpy as np
 from sklearn.base import BaseEstimator
+from sklearn.preprocessing import normalize
 import gurobipy as gb
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
@@ -57,13 +58,15 @@ class RuleGenerator(BaseEstimator):
             scaler_type=MinMaxScaler,
             with_reducts: bool = True,
             tol: float = 1e-4,
-            theta: int = 1
+            theta: int = 1,
+            covering_threshold: float = 1e-6
     ):
         self.approximation = approximation
         self.scaler_type = scaler_type
         self.with_reducts = with_reducts
         self.theta = theta
         self.tol = tol
+        self.covering_threshold = covering_threshold
 
     def __get_reducts(self, X):
         reducts = []
@@ -143,13 +146,16 @@ class RuleGenerator(BaseEstimator):
                 self.positive_region[i])
             if len(current_covering.shape) > 1:
                 current_covering = current_covering.T
-            covering[i, :] = (1 * (current_covering > 1e-6))
+            covering[i, :] = (1 * (current_covering > self.covering_threshold))
 
         self.selected_indexes = self.__optimisation_procedure(covering.T)
         self.n_rules = np.size(self.selected_indexes)
 
-    def predict(self, X):
+    def predict_proba(self, X: np.ndarray, normalized: bool = True) -> np.ndarray:
+        # rescale X
         X_test = self.scaler.transform(X)
+
+        # calculate credibility of each rule
         credibility_predictions = []
         for i in range(self.n_classes):
             credibility_predictions.append([])
@@ -159,11 +165,21 @@ class RuleGenerator(BaseEstimator):
                     fo.general_triangular_relation(X_test, self.X_scaled[i], self.theta, self.reducts[i]),
                     self.positive_region[i])
             )
+
+        # sum credibility for each class
         cumulative_credibility = []
         for i in range(self.n_classes):
             cumulative_credibility.append(np.max(np.array(credibility_predictions[i]), 0))
-        prediction = np.argmax(np.array(cumulative_credibility), 0)
-        return prediction
+        if normalized:
+            total = sum(cumulative_credibility)
+            if total != 0:
+                for index, val in enumerate(cumulative_credibility):
+                    cumulative_credibility[index] = val / total
+
+        return np.array(cumulative_credibility)
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        return np.argmax(self.predict_proba(X, normalized=False), 0)
 
     def extract_rules(self):
         holding_points = self.X_scaled[self.selected_indexes]

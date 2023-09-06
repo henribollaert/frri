@@ -49,6 +49,9 @@ class RuleInductionModel(Protocol):
     def predict(self, datax: np.ndarray) -> np.ndarray:
         ...
 
+    def predict_proba(self, datax: np.ndarray) -> np.ndarray:
+        ...
+
     def get_rules_as_string(self) -> list[str]:
         ...
 
@@ -76,6 +79,7 @@ def test_save(
         nr_of_folds: int = 10,
         encode_labels: bool = False,
         use_data_types: bool = True,  # todo this can be handled better (* operator?)
+        save_probas: bool = False,
 ) -> None:
     """
     This method runs a given model on a collection of data sets and saves the predictions
@@ -90,6 +94,7 @@ def test_save(
     :param verbose: should we print the name of the data set we are testing on?
     :param nr_of_folds: number of folds for the cross-validation
     :param encode_labels: should we encode the labels as ints and save the dict to a file?
+    :param save_probas: save probabilities instead of just the productions
     :return: Nothing
     """
     for dataset_dir in datasets_folder.iterdir():
@@ -154,7 +159,10 @@ def test_save(
             else:
                 try:
                     # query on the test set
-                    lines.extend(model.predict(x_test))
+                    if save_probas:
+                        lines.extend(model.predict_proba(x_test))
+                    else:
+                        lines.extend(model.predict(x_test))
                 except Exception as err:
                     lines.extend([f"Error while predicting on fold {fold}.", str(err)])
                     if verbose:
