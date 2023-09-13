@@ -144,6 +144,7 @@ def test_save(
 
             # TRAINING AND PREDICTION
             lines = []
+            predictions: Optional[np.ndarray] = None
             if print_info:
                 lines.append(model.get_info())
             try:
@@ -160,9 +161,9 @@ def test_save(
                 try:
                     # query on the test set
                     if save_probas:
-                        lines.extend(model.predict_proba(x_test))
+                        predictions = model.predict_proba(x_test)
                     else:
-                        lines.extend(model.predict(x_test))
+                        predictions = model.predict(x_test)
                 except Exception as err:
                     lines.extend([f"Error while predicting on fold {fold}.", str(err)])
                     if verbose:
@@ -178,6 +179,11 @@ def test_save(
                 with open(fold_result_path / f"fold{fold + 1}.dat", 'w') as f:
                     for item in lines:
                         f.write(f"{item}\n")
+                        if predictions is not None:
+                            if save_probas:
+                                np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%.7f')
+                            else:
+                                np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%i')
 
 
 def calculate_score(data_folder: Path,
@@ -331,11 +337,14 @@ def count_all_attributes(results_folder: Path,
         for fold in range(nr_of_folds):
             # look up the folder for the results on this fold of the dataset
             sum_of_attributes += np.average(count_attributes(
-                dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}.dat"
+                dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}.dat",
+                counter=counter
             ))
 
         # add scores to the dictionary
         amount_of_attributes[dataset_dir.name] = sum_of_attributes / nr_of_folds
+        if verbose:
+            print(amount_of_attributes[dataset_dir.name])
 
     return amount_of_attributes
 
