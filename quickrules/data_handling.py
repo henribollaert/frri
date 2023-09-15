@@ -154,7 +154,7 @@ def test_save(
                 else:
                     model.fit(x_train, y_train)
             except Exception as err:
-                lines.extend([f"Error while training on fold {fold}.", str(err)])
+                lines.extend([f"Error while training on fold {fold + 1}.", str(err)])
                 if verbose:
                     print(lines)
             else:
@@ -165,7 +165,7 @@ def test_save(
                     else:
                         predictions = model.predict(x_test)
                 except Exception as err:
-                    lines.extend([f"Error while predicting on fold {fold}.", str(err)])
+                    lines.extend([f"Error while predicting on fold {fold + 1}.", str(err)])
                     if verbose:
                         print(lines)
                 else:
@@ -307,12 +307,17 @@ def count_rules(file: Path) -> int:
 def count_all_attributes(results_folder: Path,
                          exclude: Optional[list[str]] = None,
                          include: Optional[list[str]] = None,
+                         metric=np.average,
                          counter: str = ',',
                          nr_of_folds: int = 10,
                          verbose: bool = False) -> dict[str, float]:
     """
-    Counts the average number of attributes in the rules generated for achieving the results in the results folder
-    :param counter: todo def make prettier
+    Counts the average metric(number of attributes) in the rules generated
+    for achieving the results in the results folder.
+    SO if metric is median, we calculate the median on each fold and then return the average median
+    rule length.
+    :param metric: summary metric to apply to the list of lengths
+    :param counter: str that gets counted on every line todo def make prettier
     :param results_folder: path to the folder containing the results and the rules
     :param exclude: data sets to exclude
     :param include: data sets to include
@@ -336,7 +341,7 @@ def count_all_attributes(results_folder: Path,
         sum_of_attributes = 0
         for fold in range(nr_of_folds):
             # look up the folder for the results on this fold of the dataset
-            sum_of_attributes += np.average(count_attributes(
+            sum_of_attributes += metric(count_attributes(
                 dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}.dat",
                 counter=counter
             ))
