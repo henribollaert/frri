@@ -49,17 +49,25 @@ class Approximation(Protocol):
         pass
 
 
+class InclusionMeasure(Protocol):
+    def inclusion(self, A: np.ndarray, B: np.ndarray) -> float:
+        ...
+
+
 # todo add parameters for t-norm and relation
+# todo should we make this a dataclass?
 class RuleGenerator(BaseEstimator):
 
     def __init__(
             self,
             approximation: Approximation,
+            inclusion_measure: InclusionMeasure,
             scaler_type=MinMaxScaler,
             with_reducts: bool = True,
             tol: float = 1e-4,
             theta: int = 1,
-            covering_threshold: float = 1e-6
+            covering_threshold: float = 1e-6,
+            inclusion_threshold: float = 0.95
     ):
         self.approximation = approximation
         self.scaler_type = scaler_type
@@ -67,6 +75,9 @@ class RuleGenerator(BaseEstimator):
         self.theta = theta
         self.tol = tol
         self.covering_threshold = covering_threshold
+        self.inclusion_threshold = inclusion_threshold
+        self.inclusion_measure = inclusion_measure
+
 
     def __get_reducts(self, X):
         reducts = []
@@ -80,19 +91,19 @@ class RuleGenerator(BaseEstimator):
                     tmp_types[elem] = 0
                     new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.theta, tmp_types),
                                                         self.positive_region[i])
-                    if fo.is_subset(new_granule, decision_set, self.tol):
+                    if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
                         continue
                     tmp_types[elem] = 1
                     new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.theta, tmp_types),
                                                         self.positive_region[i])
-                    if fo.is_subset(new_granule, decision_set, self.tol):
+                    if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
                         continue
                     tmp_types[elem] = -1
                     new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.theta, tmp_types),
                                                         self.positive_region[i])
-                    if fo.is_subset(new_granule, decision_set, self.tol):
+                    if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
                         continue
                     tmp_types[elem] = 2
@@ -167,19 +178,16 @@ class RuleGenerator(BaseEstimator):
             )
 
         # sum credibility for each class
-        cumulative_credibility = []
+        cumulative_credibility = np.zeros((X.shape[0], self.n_classes))
         for i in range(self.n_classes):
-            cumulative_credibility.append(np.max(np.array(credibility_predictions[i]), 0))
+            cumulative_credibility[:, i] = np.max(np.array(credibility_predictions[i]), 0)
         if normalized:
-            total = sum(cumulative_credibility)
-            if total != 0:
-                for index, val in enumerate(cumulative_credibility):
-                    cumulative_credibility[index] = val / total
+            cumulative_credibility = normalize(cumulative_credibility, norm='l1')
 
-        return np.array(cumulative_credibility)
+        return cumulative_credibility
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        return np.argmax(self.predict_proba(X, normalized=False), 0)
+        return np.argmax(self.predict_proba(X, normalized=False), 1)
 
     def extract_rules(self):
         holding_points = self.X_scaled[self.selected_indexes]
