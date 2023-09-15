@@ -5,6 +5,6 @@ induction algorithms:
 * QuickRules
 * OWA-QuickRules
 * (OWA-)QuickRules with pruning
-* A granular fuzzy rough rule induction algorithm
+* FRRI: a fuzzy rough rule induction algorithm
 
 Reference: Richard Jensen, Chris Cornelis, and Qiang Shen. [Hybrid fuzzy-rough rule induction and feature selection](https://cwi.ugent.be/Chris/fuzzieee2009b.pdf). pages 1151 – 1156, 09 2009
