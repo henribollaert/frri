@@ -8,6 +8,9 @@ class FuzzySet:
     """
     Class representing a fuzzy set for the QuickRules package, where elements are identified by their index in the
     training set.
+
+    We are using a dictionary instead of an array since we think that the membership functions
+    will have limited support, which would result in sparse and thus inefficient lists.
     """
     memberships: dict[int, float] = field(default_factory=dict)
     t_conorm = max
