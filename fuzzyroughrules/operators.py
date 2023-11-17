@@ -1,4 +1,5 @@
 import numpy as np
+from enum import Enum
 
 
 def lukasiewicz_implicator(x: np.ndarray | float, y: np.ndarray | float) -> np.ndarray | float:
@@ -17,3 +18,51 @@ class ImplicatorInclusion:
 
     def inclusion(self, A: np.ndarray, B: np.ndarray) -> float:
         return np.min(self.implicator(A, B))
+
+
+class RelationTypes(Enum):
+    UNUSED = 0
+    DOMINATED = 1
+    DOMINANT = -1
+    INDISCERNIBLE = 2
+
+
+def triangular_relation(
+        x: np.ndarray,
+        y: np.ndarray,
+        slopes: np.ndarray[float],
+        rel_types: np.ndarray[RelationTypes]
+):
+    x, y = np.atleast_2d(x), np.atleast_2d(y)
+    type_divisions = {rel_type: np.where(rel_types == rel_type)[0] for rel_type in
+                      [RelationTypes.DOMINATED, RelationTypes.DOMINANT, RelationTypes.INDISCERNIBLE]}
+
+    comparisons = []
+    for rel_type, div in type_divisions.items():
+        if div.size > 0:
+            comparisons.append(triangular_dominance(x[:, div], y[:, div], slopes[div], rel_type))
+
+    if len(comparisons) == 0:
+        return np.ones((x.shape[0], y.shape[0]))
+
+    return np.min(np.concatenate(comparisons, -1), -1)
+
+
+def triangular_dominance(x, y, slope=1., rel_type=RelationTypes.INDISCERNIBLE):
+    ext_dim_x = y.shape[0]
+    ext_dim_y = x.shape[0]
+    x_ext = np.repeat(x[:, np.newaxis, :], ext_dim_x, axis=1)
+    y_ext = np.repeat(y[np.newaxis, :, :], ext_dim_y, axis=0)
+
+    res = 1
+    if rel_type == RelationTypes.DOMINATED:
+        res = np.maximum(np.minimum(1 - (y_ext - x_ext) / slope, 1), 0)
+    elif rel_type == RelationTypes.DOMINANT:
+        res = np.maximum(np.minimum(1 - (x_ext - y_ext) / slope, 1), 0)
+    elif rel_type == RelationTypes.INDISCERNIBLE:
+        res = np.maximum(np.minimum(1 - np.abs(y_ext - x_ext) / slope, 1), 0)
+
+    if res.shape[-1] > 0:
+        return np.min(res, -1)
+    else:
+        return 1 + np.sum(res, -1)

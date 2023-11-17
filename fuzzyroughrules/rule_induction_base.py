@@ -1,14 +1,16 @@
 from typing import Protocol
+from dataclasses import dataclass, field
 
 import numpy as np
 from sklearn.base import BaseEstimator
-from sklearn.preprocessing import normalize
+from sklearn.preprocessing import normalize, MinMaxScaler
 import gurobipy as gb
 import matplotlib.pyplot as plt
 import matplotlib.patches as patches
+from fuzzyroughrules.operators import RelationTypes, triangular_relation, ImplicatorInclusion
+from fuzzyroughrules.approximations import LowerApproximation
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.5f}".format(x)})
-from sklearn.preprocessing import MinMaxScaler
 
 inf_val = float('Inf')
 import fuzzyroughrules.fuzzy_operators as fo
@@ -55,31 +57,100 @@ class InclusionMeasure(Protocol):
 
 
 # todo add parameters for t-norm and relation
-# todo should we make this a dataclass?
+@dataclass
 class RuleGenerator(BaseEstimator):
+    # parameters of the model
+    approximation: Approximation = LowerApproximation()
+    inclusion_measure: InclusionMeasure = ImplicatorInclusion()
+    scaler_type = MinMaxScaler
+    with_reducts: bool = True
+    optimise_attribute_order: bool = False
+    optimise_slopes: bool = False
+    slope_options: list[float] = field(default_factory=lambda: [0.001, 0.01, 0.1, 0.5, 1])
+    covering_threshold: float = 1e-6
+    inclusion_threshold: float = 1 - 1e-4
 
-    def __init__(
-            self,
-            approximation: Approximation,
-            inclusion_measure: InclusionMeasure,
-            scaler_type=MinMaxScaler,
-            with_reducts: bool = True,
-            tol: float = 1e-4,
-            theta: int = 1,
-            covering_threshold: float = 1e-6,
-            inclusion_threshold: float = 0.95
-    ):
-        self.approximation = approximation
-        self.scaler_type = scaler_type
-        self.with_reducts = with_reducts
-        self.theta = theta
-        self.tol = tol
-        self.covering_threshold = covering_threshold
-        self.inclusion_threshold = inclusion_threshold
-        self.inclusion_measure = inclusion_measure
+    # instance fields that are used during the running of the algorithm
+    X = None
+    y = None
+    n_samples = None
+    n_attributes = None
+    n_classes = None
+    scaler = None
+    X_scaled = None
+    rel_matrix_x = None
+    rel_matrix_y = None
+    positive_region = None
+    reducts = None
+    slopes = None
+    selected_indexes = None
+    n_rules = None
 
+    def __optimise_feature_order(self, X) -> np.ndarray[int]:  # todo implement
+        pass
 
     def __get_reducts(self, X):
+        reducts = []
+        slopes = []
+        if self.optimise_attribute_order:
+            ordered_attributes = self.__optimise_feature_order(X)
+        else:
+            ordered_attributes = np.arange(self.n_attributes)
+
+        for obj in range(self.n_samples):
+            decision_set = self.rel_matrix_y[obj]
+            selected_types = np.full(self.n_attributes, RelationTypes.INDISCERNIBLE, dtype=RelationTypes)
+            selected_slopes = np.ones(self.n_attributes, dtype=float)
+            if self.with_reducts:
+                for attribute in ordered_attributes:
+                    temp_types = selected_types
+
+                    # we do UNUSED separately
+                    temp_types[attribute] = RelationTypes.UNUSED
+                    new_granule = fo.lukasiewicz_t_norm(
+                        triangular_relation(X, X[obj], selected_slopes, temp_types),
+                        self.positive_region[obj]
+                    )
+                    if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
+                        selected_types = temp_types
+                        continue  # go to the next attribute
+
+                    # if UNUSED is not enough, we check the other types
+                    found = False
+                    for temp_type in [RelationTypes.DOMINATED, RelationTypes.DOMINANT, RelationTypes.INDISCERNIBLE]:
+                        if found:
+                            break
+                        temp_types[attribute] = temp_type
+                        if self.optimise_slopes:
+                            temp_slopes = selected_slopes
+                            for slope in self.slope_options:
+                                if found:
+                                    break
+                                temp_slopes[attribute] = slope
+                                new_granule = fo.lukasiewicz_t_norm(
+                                    triangular_relation(X, X[obj], temp_slopes, temp_types),
+                                    self.positive_region[obj]
+                                )
+                                if (self.inclusion_measure.inclusion(new_granule, decision_set)
+                                        > self.inclusion_threshold):
+                                    selected_types = temp_types
+                                    selected_slopes = temp_slopes
+                                    found = True
+                        else:  # we only need to check the default slope (i.e. 1)
+                            new_granule = fo.lukasiewicz_t_norm(
+                                triangular_relation(X, X[obj], selected_slopes, temp_types),
+                                self.positive_region[obj]
+                            )
+                            if (self.inclusion_measure.inclusion(new_granule, decision_set)
+                                    > self.inclusion_threshold):
+                                selected_types = temp_types
+                                found = True
+
+            reducts.append(selected_types)
+            slopes.append(selected_slopes)
+        return np.array(reducts), np.array(slopes)
+
+    def __get_reducts_old(self, X):
         reducts = []
         current_attributes = np.random.permutation(np.arange(self.n_attributes))
         for i in range(self.n_samples):
@@ -89,19 +160,19 @@ class RuleGenerator(BaseEstimator):
                 for elem in current_attributes:
                     tmp_types = selected_types
                     tmp_types[elem] = 0
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.theta, tmp_types),
+                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes, tmp_types),
                                                         self.positive_region[i])
                     if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
                         continue
                     tmp_types[elem] = 1
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.theta, tmp_types),
+                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes, tmp_types),
                                                         self.positive_region[i])
                     if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
                         continue
                     tmp_types[elem] = -1
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.theta, tmp_types),
+                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes, tmp_types),
                                                         self.positive_region[i])
                     if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
@@ -112,7 +183,7 @@ class RuleGenerator(BaseEstimator):
 
     def __optimisation_procedure(self, full_dis_covering):
         dis_model = gb.Model("discrete_rule_induction")
-
+        print(full_dis_covering)
         rules = []
         for r in range(self.n_samples):
             rules.append(dis_model.addVar(vtype=gb.GRB.BINARY, obj=1))
@@ -120,7 +191,7 @@ class RuleGenerator(BaseEstimator):
 
         for i in range(self.n_samples):
             exp = gb.quicksum([full_dis_covering[i][j] * rules[j] for j in range(self.n_samples)])
-            dis_model.addConstr(exp >= 1)
+            dis_model.addConstr(exp >= 1) # , name='Coverage requirement'
 
         dis_model.setParam("OutputFlag", 0)
         dis_model.optimize()
@@ -133,7 +204,7 @@ class RuleGenerator(BaseEstimator):
 
         return np.array(selected)
 
-    def fit(self, X, y, types):  # todo remove types or do something with it
+    def _init_fit(self, X, y):
         self.X = np.atleast_2d(X)
         self.y = y
         self.n_samples = self.X.shape[0]
@@ -144,17 +215,26 @@ class RuleGenerator(BaseEstimator):
         self.X_scaled = self.scaler.transform(self.X)
         self.rel_matrix_x = fo.triangular_similarity(self.X_scaled, self.X_scaled)
         self.rel_matrix_y = fo.discernibility_matrix(self.y, self.y)
-        '''
-        
-        '''
+
+    def fit(self, X, y, types):  # todo remove types or do something with it
+        self._init_fit(X, y)
+
         self.positive_region = self.approximation.get_approximation(self.X_scaled, self.y)
-        self.reducts = self.__get_reducts(self.X_scaled)
+        # self.reducts = self.__get_reducts_old(self.X_scaled)
+        self.reducts, self.slopes = self.__get_reducts(self.X_scaled)
 
         covering = np.zeros((self.n_samples, self.n_samples))
         for i in range(self.n_samples):
             current_covering = fo.lukasiewicz_t_norm(
-                fo.general_triangular_relation(self.X_scaled, self.X_scaled[i], self.theta, self.reducts[i]),
-                self.positive_region[i])
+                # fo.general_triangular_relation(self.X_scaled, self.X_scaled[i], self.theta, self.reducts[i]),
+                triangular_relation(
+                    self.X_scaled,
+                    self.X_scaled[i],
+                    self.slopes[i],
+                    self.reducts[i]
+                ),
+                self.positive_region[i]
+            )
             if len(current_covering.shape) > 1:
                 current_covering = current_covering.T
             covering[i, :] = (1 * (current_covering > self.covering_threshold))
@@ -165,7 +245,6 @@ class RuleGenerator(BaseEstimator):
     def predict_proba(self, X: np.ndarray, normalized: bool = True) -> np.ndarray:
         # rescale X
         X_test = self.scaler.transform(X)
-
         # calculate credibility of each rule
         credibility_predictions = []
         for i in range(self.n_classes):
@@ -173,8 +252,15 @@ class RuleGenerator(BaseEstimator):
         for i in self.selected_indexes:
             credibility_predictions[self.y[i]].append(
                 fo.lukasiewicz_t_norm(
-                    fo.general_triangular_relation(X_test, self.X_scaled[i], self.theta, self.reducts[i]),
-                    self.positive_region[i])
+                    # fo.general_triangular_relation(X_test, self.X_scaled[i], self.theta, self.reducts[i]),
+                    triangular_relation(
+                        X_test,
+                        self.X_scaled[i],
+                        self.slopes[i],
+                        self.reducts[i]
+                    ),
+                    self.positive_region[i]
+                )
             )
 
         # sum credibility for each class
@@ -189,13 +275,13 @@ class RuleGenerator(BaseEstimator):
     def predict(self, X: np.ndarray) -> np.ndarray:
         return np.argmax(self.predict_proba(X, normalized=False), 1)
 
-    def extract_rules(self):
+    def extract_rules(self):  # todo fix
         holding_points = self.X_scaled[self.selected_indexes]
         holding_reducts = self.reducts[self.selected_indexes]
         credibility = self.positive_region[self.selected_indexes]
         decisions = self.y[self.selected_indexes]
-        left_bounds_t = holding_points - np.tile(self.theta * credibility, (self.n_attributes, 1)).T
-        right_bounds_t = holding_points + np.tile(self.theta * credibility, (self.n_attributes, 1)).T
+        left_bounds_t = holding_points - np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
+        right_bounds_t = holding_points + np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
         left_bounds = self.scaler.inverse_transform(left_bounds_t)
         right_bounds = self.scaler.inverse_transform(right_bounds_t)
         self.rules = []
