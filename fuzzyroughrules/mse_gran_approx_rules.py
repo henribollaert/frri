@@ -133,10 +133,15 @@ class RuleGenerator(BaseEstimator):
          self.positive_region = np.max(low_apr, 0)
         '''
         init_set = .5*np.ones(self.n_samples)
-        self.positive_region = fo.lukasiewicz_t_norm(
+        self.positive_region =  fo.lukasiewicz_t_norm(
             fo.get_multiclass_granular_approx_mse_cvxopt(self.rel_matrix_x, self.rel_matrix_y),
             .5
         )
+        # self.positive_region = fo.get_multiclass_granular_approx_mse_cvxopt(self.rel_matrix_x, self.rel_matrix_y)
+        #todo possible solution to ecoli problem below:
+        for i, val in enumerate(self.positive_region):
+            if val < 1e-7:
+                self.positive_region[i] = 0.0
         self.reducts = self.__get_reducts(self.X_scaled)
 
         covering = np.zeros((self.n_samples, self.n_samples))
@@ -145,7 +150,7 @@ class RuleGenerator(BaseEstimator):
             if len(current_covering.shape) > 1:
                 current_covering = current_covering.T
             # print(current_covering)
-            covering[i, :] = (1*(current_covering > 1e-6))
+            covering[i, :] = (1*(current_covering > 0))
         # print(covering)
         self.selected_indexes = self.__optimisation_procedure(covering.T)
         self.n_rules = np.size(self.selected_indexes)
@@ -159,13 +164,14 @@ class RuleGenerator(BaseEstimator):
         for i in self.selected_indexes:
             credibility_predictions[self.train_prediction[i]].append(
                 fo.lukasiewicz_t_norm(fo.general_triangular_relation(X_test, self.X_scaled[i], self.theta, self.reducts[i]), 
-                self.positive_region[i])
+                self.positive_region[i]).reshape((len(X_test)))
             )
         # print(credibility_predictions)
-        cumulative_credibility = []
+        cumulative_credibility = np.zeros((X.shape[0], self.n_classes))
         for i in range(self.n_classes):
-            cumulative_credibility.append(np.max(np.array(credibility_predictions[i]), 0))
-        prediction = np.argmax(np.array(cumulative_credibility), 0)
+            if len(credibility_predictions[i]) != 0:  # easy fix for 0 size array problem!
+                cumulative_credibility[:, i] = np.max(np.array(credibility_predictions[i]), 0)
+        prediction = np.argmax(np.array(cumulative_credibility), 1)
         return prediction
 
     def extract_rules(self):

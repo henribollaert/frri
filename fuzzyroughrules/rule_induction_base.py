@@ -9,6 +9,7 @@ import matplotlib.pyplot as plt
 import matplotlib.patches as patches
 from fuzzyroughrules.operators import RelationTypes, triangular_relation, ImplicatorInclusion
 from fuzzyroughrules.approximations import LowerApproximation
+from fuzzyroughrules.feature_preprocessors import QuickReduct
 
 np.set_printoptions(formatter={'float': lambda x: "{0:0.5f}".format(x)})
 
@@ -27,6 +28,7 @@ class Rule:
         self.condition_json = []
         self.decision = 0
 
+    # todo fix: use RelationTypes here
     def add_condition(self, attribute, type, left_bound, right_bound):
         if type == 'l':
             self.left_bounds[attribute] = left_bound
@@ -48,11 +50,16 @@ class Rule:
 
 class Approximation(Protocol):
     def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
-        pass
+        ...
 
 
 class InclusionMeasure(Protocol):
     def inclusion(self, A: np.ndarray, B: np.ndarray) -> float:
+        ...
+
+
+class FeatureOrdering(Protocol):
+    def order_features(self, x: np.ndarray, y: np.ndarray, t: np.ndarray) -> np.ndarray[int]:
         ...
 
 
@@ -65,6 +72,7 @@ class RuleGenerator(BaseEstimator):
     scaler_type = MinMaxScaler
     with_reducts: bool = True
     optimise_attribute_order: bool = False
+    feature_ordering: FeatureOrdering = QuickReduct()
     optimise_slopes: bool = False
     slope_options: list[float] = field(default_factory=lambda: [0.001, 0.01, 0.1, 0.5, 1])
     covering_threshold: float = 1e-6
@@ -73,6 +81,7 @@ class RuleGenerator(BaseEstimator):
     # instance fields that are used during the running of the algorithm
     X = None
     y = None
+    types = None
     n_samples = None
     n_attributes = None
     n_classes = None
@@ -86,14 +95,14 @@ class RuleGenerator(BaseEstimator):
     selected_indexes = None
     n_rules = None
 
-    def __optimise_feature_order(self, X) -> np.ndarray[int]:  # todo implement
-        pass
+    def __optimise_feature_order(self, X, y, t) -> np.ndarray[int]:  # todo implement
+        return self.feature_ordering.order_features(X, y, t)
 
     def __get_reducts(self, X):
         reducts = []
         slopes = []
         if self.optimise_attribute_order:
-            ordered_attributes = self.__optimise_feature_order(X)
+            ordered_attributes = self.__optimise_feature_order(X, self.y, self.types)
         else:
             ordered_attributes = np.arange(self.n_attributes)
 
@@ -183,7 +192,7 @@ class RuleGenerator(BaseEstimator):
 
     def __optimisation_procedure(self, full_dis_covering):
         dis_model = gb.Model("discrete_rule_induction")
-        print(full_dis_covering)
+        # print(full_dis_covering)
         rules = []
         for r in range(self.n_samples):
             rules.append(dis_model.addVar(vtype=gb.GRB.BINARY, obj=1))
@@ -204,9 +213,10 @@ class RuleGenerator(BaseEstimator):
 
         return np.array(selected)
 
-    def _init_fit(self, X, y):
+    def _init_fit(self, X, y, t):
         self.X = np.atleast_2d(X)
         self.y = y
+        self.types = t
         self.n_samples = self.X.shape[0]
         self.n_attributes = self.X.shape[1]
         self.n_classes = len(np.unique(y))
@@ -217,7 +227,7 @@ class RuleGenerator(BaseEstimator):
         self.rel_matrix_y = fo.discernibility_matrix(self.y, self.y)
 
     def fit(self, X, y, types):  # todo remove types or do something with it
-        self._init_fit(X, y)
+        self._init_fit(X, y, types)
 
         self.positive_region = self.approximation.get_approximation(self.X_scaled, self.y)
         # self.reducts = self.__get_reducts_old(self.X_scaled)
@@ -260,13 +270,14 @@ class RuleGenerator(BaseEstimator):
                         self.reducts[i]
                     ),
                     self.positive_region[i]
-                )
+                ).reshape((len(X_test)))
             )
 
         # sum credibility for each class
         cumulative_credibility = np.zeros((X.shape[0], self.n_classes))
         for i in range(self.n_classes):
-            cumulative_credibility[:, i] = np.max(np.array(credibility_predictions[i]), 0)
+            if len(credibility_predictions[i]) != 0:  # easy fix for 0 size array problem!
+                cumulative_credibility[:, i] = np.max(np.array(credibility_predictions[i]), 0)
         if normalized:
             cumulative_credibility = normalize(cumulative_credibility, norm='l1')
 
@@ -280,20 +291,25 @@ class RuleGenerator(BaseEstimator):
         holding_reducts = self.reducts[self.selected_indexes]
         credibility = self.positive_region[self.selected_indexes]
         decisions = self.y[self.selected_indexes]
-        left_bounds_t = holding_points - np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
-        right_bounds_t = holding_points + np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
+        if self.optimise_slopes:
+            print("Extracting rules not yet supported for multiple slopes, just using default slope value (i.e., 1).")
+            # implementation was:
+            # left_bounds_t = holding_points - np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
+            # right_bounds_t = holding_points + np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
+            # I just removed the slopes
+        left_bounds_t = holding_points - np.tile(credibility, (self.n_attributes, 1)).T
+        right_bounds_t = holding_points + np.tile(credibility, (self.n_attributes, 1)).T
         left_bounds = self.scaler.inverse_transform(left_bounds_t)
         right_bounds = self.scaler.inverse_transform(right_bounds_t)
         self.rules = []
         for i in range(self.n_rules):
             rule = Rule(self.n_attributes)
             for j in range(self.n_attributes):
-                pair = {}
-                if holding_reducts[i][j] == 2:
+                if holding_reducts[i][j] is RelationTypes.INDISCERNIBLE:
                     rule.add_condition(j, 'i', left_bounds[i][j], right_bounds[i][j])
-                elif holding_reducts[i][j] == 1:
+                elif holding_reducts[i][j] == RelationTypes.DOMINATED:
                     rule.add_condition(j, 'l', left_bounds[i][j], right_bounds[i][j])
-                elif holding_reducts[i][j] == -1:
+                elif holding_reducts[i][j] == RelationTypes.DOMINANT:
                     rule.add_condition(j, 'r', left_bounds[i][j], right_bounds[i][j])
             rule.add_decision(decisions[i])
             self.rules.append(rule)

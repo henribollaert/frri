@@ -1,10 +1,9 @@
 import pandas as pd
-from typing import Optional, Protocol, Union
+from typing import Optional, Protocol
 from pathlib import Path
 from re import search
 import os
 import numpy as np
-from sklearn.base import BaseEstimator
 
 
 def get_dataset(
@@ -168,7 +167,7 @@ def test_save(
                     lines.extend([f"Error while predicting on fold {fold + 1}.", str(err)])
                     if verbose:
                         print(lines)
-                else:
+                finally:
                     # save the rules
                     if get_rules:
                         with open(fold_result_path / f"rules_fold{fold + 1}.dat", 'w') as f:
@@ -189,6 +188,7 @@ def test_save(
 def calculate_score(data_folder: Path,
                     results_folder: Path,
                     metric,
+                    aggregation_function=np.mean,
                     label_encoding: bool = False,
                     exclude: Optional[list[str]] = None,
                     include: Optional[list[str]] = None,
@@ -201,6 +201,7 @@ def calculate_score(data_folder: Path,
     :param data_folder: folder containing the data sets
     :param results_folder: folder containing the results
     :param metric: metric to use
+    :param aggregation_function: function used to aggregate the metric scores on different folds
     :param exclude: data sets to exclude
     :param include: data sets to include
     :param nr_of_folds: number of folds of the cross-validation
@@ -225,7 +226,7 @@ def calculate_score(data_folder: Path,
         dataset_result_path = results_folder / short_name
 
         # create dictionaries to save results of this dataset
-        sum_of_metrics = 0
+        metrics = []
         successful_folds = 0
         for fold in range(nr_of_folds):
 
@@ -241,14 +242,14 @@ def calculate_score(data_folder: Path,
                 predictions = pd.read_csv(fold_result_path / f"fold{fold + 1}.dat",
                                           comment='@', header=None).values
                 try:
-                    sum_of_metrics += metric(y_test, predictions)
+                    metrics.append(metric(y_test, predictions))
                 except TypeError:
                     print(f"Unsuccessful for fold{fold + 1} on {short_name}.")
                 else:
                     successful_folds += 1
 
         # add scores to the dictionary
-        scores[short_name] = sum_of_metrics / successful_folds if successful_folds > 0 else np.NaN
+        scores[short_name] = aggregation_function(metrics) if successful_folds > 0 else np.NaN
 
     return scores
 

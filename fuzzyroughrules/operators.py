@@ -1,6 +1,6 @@
 import numpy as np
 from enum import Enum
-
+from quickrules.weights import Weights, LinearWeights, TruncatedWeights
 
 def lukasiewicz_implicator(x: np.ndarray | float, y: np.ndarray | float) -> np.ndarray | float:
     return np.minimum(1 - x + y, 1)
@@ -17,7 +17,32 @@ class ImplicatorInclusion:
         self.implicator = implicator
 
     def inclusion(self, A: np.ndarray, B: np.ndarray) -> float:
+        A = np.squeeze(A)
+        B = np.squeeze(B)
         return np.min(self.implicator(A, B))
+
+
+class OWAImplicatorInclusion:
+    """
+    Fuzzy sets are modelled as numpy arrays that contain the membership of each element of the dataset (incl 0's).
+    """
+    def __init__(
+            self,
+            implicator=lukasiewicz_implicator,  # should use numpy vectorisation
+            weight_function: Weights = LinearWeights(),
+    ):
+        self.implicator = implicator
+        self.weight_function = weight_function
+
+    def inclusion(self, A: np.ndarray, B: np.ndarray) -> float:
+        A = np.squeeze(A)
+        B = np.squeeze(B)
+        weights = self.weight_function(len(A))
+        implicator_values = self.implicator(A, B)
+        implicator_values.sort()  # memberships are sorted ascending -> we want to emulate "min"
+
+        weighted_memberships = [w * m for w, m in zip(weights, implicator_values)]
+        return sum(weighted_memberships)
 
 
 class RelationTypes(Enum):
