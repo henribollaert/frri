@@ -2,11 +2,13 @@ from typing import Protocol
 from dataclasses import dataclass, field
 
 import numpy as np
-from sklearn.base import BaseEstimator
+from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.preprocessing import normalize, MinMaxScaler
+from sklearn.utils.multiclass import check_classification_targets
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 import gurobipy as gb
-import matplotlib.pyplot as plt
-import matplotlib.patches as patches
+# import matplotlib.pyplot as plt
+# import matplotlib.patches as patches
 from fuzzyroughrules.operators import RelationTypes, triangular_relation, ImplicatorInclusion
 from fuzzyroughrules.approximations import LowerApproximation
 from fuzzyroughrules.feature_preprocessors import QuickReduct
@@ -20,7 +22,7 @@ import importlib
 importlib.reload(fo)
 
 
-class Rule:
+class OldRule:
     def __init__(self, size):
         self.size = size
         self.left_bounds = inf_val * np.ones(self.size)
@@ -48,6 +50,16 @@ class Rule:
         self.decision = decision
 
 
+@dataclass
+class Rule:
+    antecedent: np.ndarray
+    reducts: np.ndarray
+    slopes: np.ndarray
+    credibility: np.ndarray
+    decision: int
+    as_string: str = field(default_factory=lambda: "Not yet extracted")
+
+
 class Approximation(Protocol):
     def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         ...
@@ -65,51 +77,44 @@ class FeatureOrdering(Protocol):
 
 # todo add parameters for t-norm and relation
 @dataclass
-class RuleGenerator(BaseEstimator):
+class RuleGenerator(BaseEstimator, ClassifierMixin):
     # parameters of the model
-    approximation: Approximation = LowerApproximation()
-    inclusion_measure: InclusionMeasure = ImplicatorInclusion()
-    scaler_type = MinMaxScaler
     with_reducts: bool = True
     optimise_attribute_order: bool = False
-    feature_ordering: FeatureOrdering = QuickReduct()
     optimise_slopes: bool = False
-    slope_options: list[float] = field(default_factory=lambda: [0.001, 0.01, 0.1, 0.5, 1])
+    slope_options: list[float] = None
     covering_threshold: float = 1e-6
     inclusion_threshold: float = 1 - 1e-4
-
-    # instance fields that are used during the running of the algorithm
-    X = None
-    y = None
-    types = None
-    n_samples = None
-    n_attributes = None
-    n_classes = None
+    approximation: Approximation = None
+    inclusion_measure: InclusionMeasure = None
+    attribute_ordering: FeatureOrdering = None
     scaler = None
-    X_scaled = None
-    rel_matrix_x = None
-    rel_matrix_y = None
-    positive_region = None
-    reducts = None
-    slopes = None
-    selected_indexes = None
-    n_rules = None
+
+    def set_params(self, **params):
+        if not params:
+            return self
+
+        for key, value in params.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise ValueError(f"RuleGenerator does not have a {key} parameter.")
 
     def __optimise_feature_order(self, X, y, t) -> np.ndarray[int]:  # todo implement
-        return self.feature_ordering.order_features(X, y, t)
+        return self.attribute_ordering_.order_features(X, y, t)
 
-    def __get_reducts(self, X):
+    def __get_reducts(self, X, y):
         reducts = []
         slopes = []
         if self.optimise_attribute_order:
-            ordered_attributes = self.__optimise_feature_order(X, self.y, self.types)
+            ordered_attributes = self.__optimise_feature_order(X, y, self.types_)
         else:
-            ordered_attributes = np.arange(self.n_attributes)
+            ordered_attributes = np.arange(self.n_features_in_)
 
-        for obj in range(self.n_samples):
-            decision_set = self.rel_matrix_y[obj]
-            selected_types = np.full(self.n_attributes, RelationTypes.INDISCERNIBLE, dtype=RelationTypes)
-            selected_slopes = np.ones(self.n_attributes, dtype=float)
+        for obj in range(self.n_samples_):
+            decision_set = self.rel_matrix_y_[obj]
+            selected_types = np.full(self.n_features_in_, RelationTypes.INDISCERNIBLE, dtype=RelationTypes)
+            selected_slopes = np.ones(self.n_features_in_, dtype=float)
             if self.with_reducts:
                 for attribute in ordered_attributes:
                     temp_types = selected_types
@@ -118,9 +123,9 @@ class RuleGenerator(BaseEstimator):
                     temp_types[attribute] = RelationTypes.UNUSED
                     new_granule = fo.lukasiewicz_t_norm(
                         triangular_relation(X, X[obj], selected_slopes, temp_types),
-                        self.positive_region[obj]
+                        self.positive_region_[obj]
                     )
-                    if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
+                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = temp_types
                         continue  # go to the next attribute
 
@@ -132,15 +137,15 @@ class RuleGenerator(BaseEstimator):
                         temp_types[attribute] = temp_type
                         if self.optimise_slopes:
                             temp_slopes = selected_slopes
-                            for slope in self.slope_options:
+                            for slope in self.slope_options_:
                                 if found:
                                     break
                                 temp_slopes[attribute] = slope
                                 new_granule = fo.lukasiewicz_t_norm(
                                     triangular_relation(X, X[obj], temp_slopes, temp_types),
-                                    self.positive_region[obj]
+                                    self.positive_region_[obj]
                                 )
-                                if (self.inclusion_measure.inclusion(new_granule, decision_set)
+                                if (self.inclusion_measure_.inclusion(new_granule, decision_set)
                                         > self.inclusion_threshold):
                                     selected_types = temp_types
                                     selected_slopes = temp_slopes
@@ -148,9 +153,9 @@ class RuleGenerator(BaseEstimator):
                         else:  # we only need to check the default slope (i.e. 1)
                             new_granule = fo.lukasiewicz_t_norm(
                                 triangular_relation(X, X[obj], selected_slopes, temp_types),
-                                self.positive_region[obj]
+                                self.positive_region_[obj]
                             )
-                            if (self.inclusion_measure.inclusion(new_granule, decision_set)
+                            if (self.inclusion_measure_.inclusion(new_granule, decision_set)
                                     > self.inclusion_threshold):
                                 selected_types = temp_types
                                 found = True
@@ -161,29 +166,29 @@ class RuleGenerator(BaseEstimator):
 
     def __get_reducts_old(self, X):
         reducts = []
-        current_attributes = np.random.permutation(np.arange(self.n_attributes))
-        for i in range(self.n_samples):
-            decision_set = self.rel_matrix_y[i]
-            selected_types = 2 * np.ones(self.n_attributes, dtype=int)
+        current_attributes = np.random.permutation(np.arange(self.n_features_in_))
+        for i in range(self.n_samples_):
+            decision_set = self.rel_matrix_y_[i]
+            selected_types = 2 * np.ones(self.n_features_in_, dtype=int)
             if self.with_reducts:
                 for elem in current_attributes:
                     tmp_types = selected_types
                     tmp_types[elem] = 0
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes, tmp_types),
-                                                        self.positive_region[i])
-                    if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
+                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes_, tmp_types),
+                                                        self.positive_region_[i])
+                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
                         continue
                     tmp_types[elem] = 1
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes, tmp_types),
-                                                        self.positive_region[i])
-                    if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
+                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes_, tmp_types),
+                                                        self.positive_region_[i])
+                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
                         continue
                     tmp_types[elem] = -1
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes, tmp_types),
-                                                        self.positive_region[i])
-                    if self.inclusion_measure.inclusion(new_granule, decision_set) > self.inclusion_threshold:
+                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes_, tmp_types),
+                                                        self.positive_region_[i])
+                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.inclusion_threshold:
                         selected_types = tmp_types
                         continue
                     tmp_types[elem] = 2
@@ -194,88 +199,106 @@ class RuleGenerator(BaseEstimator):
         dis_model = gb.Model("discrete_rule_induction")
         # print(full_dis_covering)
         rules = []
-        for r in range(self.n_samples):
+        for r in range(self.n_samples_):
             rules.append(dis_model.addVar(vtype=gb.GRB.BINARY, obj=1))
         dis_model.modelSense = gb.GRB.MINIMIZE
 
-        for i in range(self.n_samples):
-            exp = gb.quicksum([full_dis_covering[i][j] * rules[j] for j in range(self.n_samples)])
-            dis_model.addConstr(exp >= 1) # , name='Coverage requirement'
+        for i in range(self.n_samples_):
+            exp = gb.quicksum([full_dis_covering[i][j] * rules[j] for j in range(self.n_samples_)])
+            dis_model.addConstr(exp >= 1)  # , name='Coverage requirement'
 
         dis_model.setParam("OutputFlag", 0)
         dis_model.optimize()
 
         selected = []
-        for i in range(self.n_samples):
-            # print(rules[i])
+        for i in range(self.n_samples_):
             if rules[i].x > 0.99:
                 selected.append(i)
 
         return np.array(selected)
 
-    def _init_fit(self, X, y, t):
-        self.X = np.atleast_2d(X)
-        self.y = y
-        self.types = t
-        self.n_samples = self.X.shape[0]
-        self.n_attributes = self.X.shape[1]
-        self.n_classes = len(np.unique(y))
-        self.scaler = self.scaler_type()
-        self.scaler.fit(self.X)
-        self.X_scaled = self.scaler.transform(self.X)
-        self.rel_matrix_x = fo.triangular_similarity(self.X_scaled, self.X_scaled)
-        self.rel_matrix_y = fo.discernibility_matrix(self.y, self.y)
+    def fit(self, X: np.ndarray, y: np.ndarray, types: np.ndarray = None):
+        # initialise fit
+        X, y = check_X_y(X, y)
+        check_classification_targets(y)
+        self.classes_, y = np.unique(y, return_inverse=True)
+        self.n_classes_ = len(self.classes_)
+        self.types_ = types
+        self.n_samples_, self.n_features_in_ = X.shape
 
-    def fit(self, X, y, types):  # todo remove types or do something with it
-        self._init_fit(X, y, types)
+        if self.approximation is None:
+            self.approximation_ = LowerApproximation()
+        if self.inclusion_measure is None:
+            self.inclusion_measure_ = ImplicatorInclusion()
+        if self.optimise_attribute_order and self.attribute_ordering is None:
+            self.attribute_ordering_ = QuickReduct()
+        if self.scaler is None:
+            self.scaler_ = MinMaxScaler()
+        if self.optimise_slopes and self.slope_options is None:
+            self.slope_options_ = [0.001, 0.01, 0.1, 0.5, 1]
 
-        self.positive_region = self.approximation.get_approximation(self.X_scaled, self.y)
-        # self.reducts = self.__get_reducts_old(self.X_scaled)
-        self.reducts, self.slopes = self.__get_reducts(self.X_scaled)
+        X = self.scaler_.fit_transform(X)
+        self.rel_matrix_x_ = fo.triangular_similarity(X, X)
+        self.rel_matrix_y_ = fo.discernibility_matrix(y, y)
 
-        covering = np.zeros((self.n_samples, self.n_samples))
-        for i in range(self.n_samples):
+        # calculate positive region and perform reducts
+        self.positive_region_ = self.approximation_.get_approximation(X, y)
+        self.reducts_, self.slopes_ = self.__get_reducts(X, y)
+
+        covering = np.zeros((self.n_samples_, self.n_samples_))
+
+        for i in range(self.n_samples_):
             current_covering = fo.lukasiewicz_t_norm(
-                # fo.general_triangular_relation(self.X_scaled, self.X_scaled[i], self.theta, self.reducts[i]),
                 triangular_relation(
-                    self.X_scaled,
-                    self.X_scaled[i],
-                    self.slopes[i],
-                    self.reducts[i]
+                    X,
+                    X[i],
+                    self.slopes_[i],
+                    self.reducts_[i]
                 ),
-                self.positive_region[i]
+                self.positive_region_[i]
             )
             if len(current_covering.shape) > 1:
                 current_covering = current_covering.T
             covering[i, :] = (1 * (current_covering > self.covering_threshold))
 
-        self.selected_indexes = self.__optimisation_procedure(covering.T)
-        self.n_rules = np.size(self.selected_indexes)
+        selected_indexes = self.__optimisation_procedure(covering.T)
+        self.rules_ = [Rule(
+            X[i],
+            self.reducts_[i],
+            self.slopes_[i],
+            self.positive_region_[i],
+            y[i]
+        ) for i in selected_indexes]
+
+        self.n_rules_ = np.size(selected_indexes)
+
+        return self
 
     def predict_proba(self, X: np.ndarray, normalized: bool = True) -> np.ndarray:
+        check_is_fitted(self)
         # rescale X
-        X_test = self.scaler.transform(X)
+        X = check_array(X)
+        X_test = self.scaler_.transform(X)
         # calculate credibility of each rule
         credibility_predictions = []
-        for i in range(self.n_classes):
+        for i in range(self.n_classes_):
             credibility_predictions.append([])
-        for i in self.selected_indexes:
-            credibility_predictions[self.y[i]].append(
+        for rule in self.rules_:
+            credibility_predictions[rule.decision].append(
                 fo.lukasiewicz_t_norm(
-                    # fo.general_triangular_relation(X_test, self.X_scaled[i], self.theta, self.reducts[i]),
                     triangular_relation(
                         X_test,
-                        self.X_scaled[i],
-                        self.slopes[i],
-                        self.reducts[i]
+                        rule.antecedent,
+                        rule.slopes,
+                        rule.reducts
                     ),
-                    self.positive_region[i]
+                    rule.credibility
                 ).reshape((len(X_test)))
             )
 
         # sum credibility for each class
-        cumulative_credibility = np.zeros((X.shape[0], self.n_classes))
-        for i in range(self.n_classes):
+        cumulative_credibility = np.zeros((X.shape[0], self.n_classes_))
+        for i in range(self.n_classes_):
             if len(credibility_predictions[i]) != 0:  # easy fix for 0 size array problem!
                 cumulative_credibility[:, i] = np.max(np.array(credibility_predictions[i]), 0)
         if normalized:
@@ -284,83 +307,78 @@ class RuleGenerator(BaseEstimator):
         return cumulative_credibility
 
     def predict(self, X: np.ndarray) -> np.ndarray:
-        return np.argmax(self.predict_proba(X, normalized=False), 1)
+        check_is_fitted(self)
+        return self.classes_[np.argmax(self.predict_proba(X, normalized=False), 1)]
 
-    def extract_rules(self):  # todo fix
-        holding_points = self.X_scaled[self.selected_indexes]
-        holding_reducts = self.reducts[self.selected_indexes]
-        credibility = self.positive_region[self.selected_indexes]
-        decisions = self.y[self.selected_indexes]
+    # def plot_rules2d(self, indeces):
+    #     i = indeces[0]
+    #     j = indeces[1]
+    #     fig, ax = plt.subplots(1)
+    #     colors = np.random.rand(self.n_features_in_, 3)
+    #     ax.scatter(self.X[:, i], self.X[:, j], c=colors[self.y])
+    #     ylims = ax.get_ylim()
+    #     xlims = ax.get_xlim()
+    #     leftylim = ylims[0]
+    #     rightylim = ylims[1]
+    #     leftxlim = xlims[0]
+    #     rightxlim = xlims[1]
+    #
+    #     for k in range(self.n_rules):
+    #         rule = self.rules[k]
+    #         if rule.left_bounds[i] < inf_val:
+    #             rulexleft = rule.left_bounds[0]
+    #         else:
+    #             rulexleft = leftxlim
+    #         if rule.right_bounds[i] < inf_val:
+    #             rulexright = rule.right_bounds[0]
+    #         else:
+    #             rulexright = rightxlim
+    #         if rule.left_bounds[j] < inf_val:
+    #             ruleyleft = rule.left_bounds[1]
+    #         else:
+    #             ruleyleft = leftylim
+    #         if rule.right_bounds[j] < inf_val:
+    #             ruleyright = rule.right_bounds[1]
+    #         else:
+    #             ruleyright = rightylim
+    #
+    #         col = colors[self.y[self.selected_indexes[k]]]
+    #         rect = patches.Rectangle((rulexleft, ruleyleft),
+    #                                  rulexright - rulexleft,
+    #                                  ruleyright - ruleyleft,
+    #                                  linewidth=1, edgecolor=col, facecolor='none')
+    #
+    #         ax.add_patch(rect)
+    #     return ax
+
+    def get_info(self) -> str:
+        return str(self)
+
+    def __str__(self) -> str:
+        return f"@non-overlap-rules-base\n@approximation: {self.approximation_}\n@scaler: {self.scaler}"
+
+    def get_rules_as_string(self) -> list[str]:
         if self.optimise_slopes:
             print("Extracting rules not yet supported for multiple slopes, just using default slope value (i.e., 1).")
             # implementation was:
             # left_bounds_t = holding_points - np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
             # right_bounds_t = holding_points + np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
             # I just removed the slopes
-        left_bounds_t = holding_points - np.tile(credibility, (self.n_attributes, 1)).T
-        right_bounds_t = holding_points + np.tile(credibility, (self.n_attributes, 1)).T
-        left_bounds = self.scaler.inverse_transform(left_bounds_t)
-        right_bounds = self.scaler.inverse_transform(right_bounds_t)
-        self.rules = []
-        for i in range(self.n_rules):
-            rule = Rule(self.n_attributes)
-            for j in range(self.n_attributes):
-                if holding_reducts[i][j] is RelationTypes.INDISCERNIBLE:
-                    rule.add_condition(j, 'i', left_bounds[i][j], right_bounds[i][j])
-                elif holding_reducts[i][j] == RelationTypes.DOMINATED:
-                    rule.add_condition(j, 'l', left_bounds[i][j], right_bounds[i][j])
-                elif holding_reducts[i][j] == RelationTypes.DOMINANT:
-                    rule.add_condition(j, 'r', left_bounds[i][j], right_bounds[i][j])
-            rule.add_decision(decisions[i])
-            self.rules.append(rule)
+        old_rules = []
+        for rule in self.rules_:
+            left_bound_t = rule.antecedent - np.tile(rule.credibility, (self.n_features_in_, 1)).T
+            right_bound_t = rule.antecedent + np.tile(rule.credibility, (self.n_features_in_, 1)).T
+            left_bound = self.scaler_.inverse_transform(left_bound_t)
+            right_bound = self.scaler_.inverse_transform(right_bound_t)
 
-    def plot_rules2d(self, indeces):
-        i = indeces[0]
-        j = indeces[1]
-        fig, ax = plt.subplots(1)
-        colors = np.random.rand(self.n_classes, 3)
-        ax.scatter(self.X[:, i], self.X[:, j], c=colors[self.y])
-        ylims = ax.get_ylim()
-        xlims = ax.get_xlim()
-        leftylim = ylims[0]
-        rightylim = ylims[1]
-        leftxlim = xlims[0]
-        rightxlim = xlims[1]
-
-        for k in range(self.n_rules):
-            rule = self.rules[k]
-            if rule.left_bounds[i] < inf_val:
-                rulexleft = rule.left_bounds[0]
-            else:
-                rulexleft = leftxlim
-            if rule.right_bounds[i] < inf_val:
-                rulexright = rule.right_bounds[0]
-            else:
-                rulexright = rightxlim
-            if rule.left_bounds[j] < inf_val:
-                ruleyleft = rule.left_bounds[1]
-            else:
-                ruleyleft = leftylim
-            if rule.right_bounds[j] < inf_val:
-                ruleyright = rule.right_bounds[1]
-            else:
-                ruleyright = rightylim
-
-            col = colors[self.y[self.selected_indexes[k]]]
-            rect = patches.Rectangle((rulexleft, ruleyleft),
-                                     rulexright - rulexleft,
-                                     ruleyright - ruleyleft,
-                                     linewidth=1, edgecolor=col, facecolor='none')
-
-            ax.add_patch(rect)
-        return ax
-
-    def get_info(self) -> str:
-        return str(self)
-
-    def __str__(self) -> str:
-        return f"@non-overlap-rules-base\n@approximation: {self.approximation}\n@scaler: {self.scaler_type()}"
-
-    def get_rules_as_string(self) -> list[str]:
-        self.extract_rules()
-        return [f"{rule.condition_json}, class: {rule.decision}" for rule in self.rules]
+            created_old_rule = OldRule(self.n_features_in_)
+            for j in range(self.n_features_in_):
+                if rule.reducts[j] is RelationTypes.INDISCERNIBLE:
+                    created_old_rule.add_condition(j, 'i', left_bound[j], right_bound[j])
+                elif rule.reducts[j] == RelationTypes.DOMINATED:
+                    created_old_rule.add_condition(j, 'l', left_bound[j], right_bound[j])
+                elif rule.reducts[j] == RelationTypes.DOMINANT:
+                    created_old_rule.add_condition(j, 'r', left_bound[j], right_bound[j])
+            created_old_rule.add_decision(rule.decision)
+            old_rules.append(created_old_rule)
+        return [f"{rule.condition_json}, class: {rule.decision}" for rule in old_rules]
