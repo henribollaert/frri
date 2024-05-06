@@ -226,16 +226,12 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         self.types_ = types
         self.n_samples_, self.n_features_in_ = X.shape
 
-        if self.approximation is None:
-            self.approximation_ = LowerApproximation()
-        if self.inclusion_measure is None:
-            self.inclusion_measure_ = ImplicatorInclusion()
-        if self.optimise_attribute_order and self.attribute_ordering is None:
-            self.attribute_ordering_ = QuickReduct()
-        if self.scaler is None:
-            self.scaler_ = MinMaxScaler()
-        if self.optimise_slopes and self.slope_options is None:
-            self.slope_options_ = [0.001, 0.01, 0.1, 0.5, 1]
+        self.approximation_ = LowerApproximation() if self.approximation is None else self.approximation
+        self.inclusion_measure_ = ImplicatorInclusion() if self.inclusion_measure is None else self.inclusion_measure
+        self.attribute_ordering_ = QuickReduct() if self.attribute_ordering is None else self.attribute_ordering
+        self.scaler_ = MinMaxScaler() if self.scaler is None else self.scaler
+        self.slope_options_ = [0.001, 0.01, 0.1, 0.5, 1] if self.slope_options is None else self.slope_options
+
 
         X = self.scaler_.fit_transform(X)
         self.rel_matrix_x_ = fo.triangular_similarity(X, X)
