@@ -61,7 +61,7 @@ class QuickReduct:
             best_attribute = None
             for attribute in range(self.nr_of_attributes):
                 # we skip the already used attributes
-                if used_attributes[attribute] in new_order:
+                if used_attributes[attribute]:
                     continue
 
                 b_with_a = [_ for _ in used_attributes]
@@ -77,9 +77,9 @@ class QuickReduct:
             if best_attribute is None:
                 # todo fix "AttributeError: 'QuickReduct' object has no attribute 'verbose'"
                 # if self.verbose:
-                #     print(f"No best attribute found! Gamma_b is {gamma_b},"
-                #           f" while Gamma_a is {gamma_a}. Used attributes are:")
-                #     print(used_attributes)
+                print(f"No best attribute found! Gamma_b is {gamma_b},"
+                      f" while Gamma_a is {gamma_a}. Used attributes are:")
+                print(used_attributes)
                 for att, used in enumerate(used_attributes):
                     if not used:
                         new_order.append(att)
