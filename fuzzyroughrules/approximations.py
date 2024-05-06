@@ -5,6 +5,9 @@ from dataclasses import dataclass
 
 
 class LowerApproximation:
+    def __init__(self, implicator=None):
+        self.implicator = implicator
+
     def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         rel_matrix_x = fo.triangular_similarity(X, X)
         rel_matrix_y = fo.discernibility_matrix(y, y)
