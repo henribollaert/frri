@@ -99,6 +99,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                 setattr(self, key, value)
             else:
                 raise ValueError(f"RuleGenerator does not have a {key} parameter.")
+        return self
 
     def __optimise_feature_order(self, X, y, t) -> np.ndarray[int]:  # todo implement
         return self.attribute_ordering_.order_features(X, y, t)
@@ -351,7 +352,10 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         return str(self)
 
     def __str__(self) -> str:
-        return f"@non-overlap-rules-base\n@approximation: {self.approximation_}\n@scaler: {self.scaler}"
+        if hasattr(self, "approximation_"):
+            return f"@non-overlap-rules-base\n@approximation: {self.approximation_}\n@scaler: {self.scaler}"
+        else:
+            return f"@non-overlap-rules-base-NOT-YET-FITTED"
 
     def get_rules_as_string(self) -> list[str]:
         if self.optimise_slopes:
