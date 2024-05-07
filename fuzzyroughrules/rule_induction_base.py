@@ -368,8 +368,8 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         for rule in self.rules_:
             left_bound_t = rule.antecedent - np.tile(rule.credibility, (self.n_features_in_, 1)).T
             right_bound_t = rule.antecedent + np.tile(rule.credibility, (self.n_features_in_, 1)).T
-            left_bound = self.scaler_.inverse_transform(left_bound_t)
-            right_bound = self.scaler_.inverse_transform(right_bound_t)
+            left_bound = np.squeeze(self.scaler_.inverse_transform(left_bound_t))
+            right_bound = np.squeeze(self.scaler_.inverse_transform(right_bound_t))
 
             created_old_rule = OldRule(self.n_features_in_)
             for j in range(self.n_features_in_):
