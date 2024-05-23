@@ -1,10 +1,6 @@
 import numpy as np
-# from sklearn.base import BaseEstimator, ClassifierMixin
-# from sklearn.preprocessing import normalize, MinMaxScaler
-# from sklearn.utils.multiclass import check_classification_targets
-from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+from sklearn.utils.validation import check_X_y
 from sklearn.model_selection import GridSearchCV
-# from fuzzyroughrules.operators import RelationTypes, triangular_relation, ImplicatorInclusion
 from fuzzyroughrules.rule_induction_base import RuleGenerator
 from dataclasses import dataclass
 from typing import Optional
