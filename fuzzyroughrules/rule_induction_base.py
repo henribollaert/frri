@@ -165,37 +165,6 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
             slopes.append(selected_slopes)
         return np.array(reducts), np.array(slopes)
 
-    def __get_reducts_old(self, X):
-        reducts = []
-        current_attributes = np.random.permutation(np.arange(self.n_features_in_))
-        for i in range(self.n_samples_):
-            decision_set = self.rel_matrix_y_[i]
-            selected_types = 2 * np.ones(self.n_features_in_, dtype=int)
-            if self.with_reducts:
-                for elem in current_attributes:
-                    tmp_types = selected_types
-                    tmp_types[elem] = 0
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes_, tmp_types),
-                                                        self.positive_region_[i])
-                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.inclusion_threshold:
-                        selected_types = tmp_types
-                        continue
-                    tmp_types[elem] = 1
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes_, tmp_types),
-                                                        self.positive_region_[i])
-                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.inclusion_threshold:
-                        selected_types = tmp_types
-                        continue
-                    tmp_types[elem] = -1
-                    new_granule = fo.lukasiewicz_t_norm(fo.general_triangular_relation(X, X[i], self.slopes_, tmp_types),
-                                                        self.positive_region_[i])
-                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.inclusion_threshold:
-                        selected_types = tmp_types
-                        continue
-                    tmp_types[elem] = 2
-            reducts.append(selected_types)
-        return np.array(reducts)
-
     def __optimisation_procedure(self, full_dis_covering):
         dis_model = gb.Model("discrete_rule_induction")
         # print(full_dis_covering)
