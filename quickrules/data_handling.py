@@ -144,14 +144,14 @@ def test_save(
             # TRAINING AND PREDICTION
             lines = []
             predictions: Optional[np.ndarray] = None
-            if print_info:
-                lines.append(model.get_info())
             try:
                 # fit to the training set
                 if use_data_types:
                     model.fit(x_train, y_train, t_train)
                 else:
                     model.fit(x_train, y_train)
+                if print_info:
+                    lines.append(model.get_info())
             except Exception as err:
                 lines.extend([f"Error while training on fold {fold + 1}.", str(err)])
                 if verbose:
@@ -178,11 +178,11 @@ def test_save(
                 with open(fold_result_path / f"fold{fold + 1}.dat", 'w') as f:
                     for item in lines:
                         f.write(f"{item}\n")
-                        if predictions is not None:
-                            if save_probas:
-                                np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%.7f')
-                            else:
-                                np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%i')
+                    if predictions is not None:  # this was one tab further
+                        if save_probas:
+                            np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%.7f')
+                        else:
+                            np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%i')
 
 
 def calculate_score(data_folder: Path,

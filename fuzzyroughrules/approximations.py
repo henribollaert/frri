@@ -67,3 +67,18 @@ class MulticlassMSEGurobiApproximation:
             weights=self.weights,
             nn_approx=self.nn_approx,
         )
+
+
+@dataclass
+class OWALowerApproximation:
+    weights: str = 'add'
+    # t_norm:
+
+    def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        rel_matrix_x = fo.triangular_similarity(X, X)
+        rel_matrix_y = fo.discernibility_matrix(y, y)
+        return fo.get_owa_ind_upp_apr(
+            relation_matrix=rel_matrix_x,
+            fuzzy_set=rel_matrix_y,
+            weights=self.weights
+        )
