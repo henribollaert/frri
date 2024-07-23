@@ -84,7 +84,8 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     optimise_slopes: bool = False
     slope_options: list[float] = None
     covering_threshold: float = 1e-6
-    inclusion_threshold: float = 1 - 1e-4
+    inclusion_threshold: float = 1 - 1e-6
+    priors_influence: float = 0
     approximation: Approximation = None
     inclusion_measure: InclusionMeasure = None
     attribute_ordering: FeatureOrdering = None
@@ -104,6 +105,17 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     def __optimise_feature_order(self, X, y, t) -> np.ndarray[int]:  # todo implement
         return self.attribute_ordering_.order_features(X, y, t)
 
+    def __get_inclusion_threshold(self, obj, label) -> float:
+        """
+
+        :param obj: object
+        :param label: label
+        :return:
+        """
+        if not self.priors_influence:
+            return self.inclusion_threshold
+        return (self.priors_[label] * self.priors_influence + 1 - self.priors_influence) * self.inclusion_threshold  # high scale
+
     def __get_reducts(self, X, y):
         reducts = []
         slopes = []
@@ -116,6 +128,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
             decision_set = self.rel_matrix_y_[obj]
             selected_types = np.full(self.n_features_in_, RelationTypes.INDISCERNIBLE, dtype=RelationTypes)
             selected_slopes = np.ones(self.n_features_in_, dtype=float)
+
             if self.with_reducts:
                 for attribute in ordered_attributes:
                     temp_types = selected_types
@@ -126,7 +139,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                         triangular_relation(X, X[obj], selected_slopes, temp_types),
                         self.positive_region_[obj]
                     )
-                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.inclusion_threshold:
+                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.__get_inclusion_threshold(X[obj], y[obj]):
                         selected_types = temp_types
                         continue  # go to the next attribute
 
@@ -147,7 +160,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                                     self.positive_region_[obj]
                                 )
                                 if (self.inclusion_measure_.inclusion(new_granule, decision_set)
-                                        > self.inclusion_threshold):
+                                        > self.__get_inclusion_threshold(X[obj], y[obj])):
                                     selected_types = temp_types
                                     selected_slopes = temp_slopes
                                     found = True
@@ -157,7 +170,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                                 self.positive_region_[obj]
                             )
                             if (self.inclusion_measure_.inclusion(new_granule, decision_set)
-                                    > self.inclusion_threshold):
+                                    > self.__get_inclusion_threshold(X[obj], y[obj])):
                                 selected_types = temp_types
                                 found = True
 
@@ -191,7 +204,8 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         # initialise fit
         X, y = check_X_y(X, y)
         check_classification_targets(y)
-        self.classes_, y = np.unique(y, return_inverse=True)
+        self.classes_, y, counts = np.unique(y, return_inverse=True, return_counts=True)
+        self.priors_ = np.divide(counts, max(counts))  # scaled_priors
         self.n_classes_ = len(self.classes_)
         self.types_ = types
         self.n_samples_, self.n_features_in_ = X.shape
