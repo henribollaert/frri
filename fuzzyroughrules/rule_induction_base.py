@@ -7,8 +7,6 @@ from sklearn.preprocessing import normalize, MinMaxScaler
 from sklearn.utils.multiclass import check_classification_targets
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
 import gurobipy as gb
-# import matplotlib.pyplot as plt
-# import matplotlib.patches as patches
 from fuzzyroughrules.operators import RelationTypes, triangular_relation, ImplicatorInclusion
 from fuzzyroughrules.approximations import LowerApproximation
 from fuzzyroughrules.feature_preprocessors import QuickReduct

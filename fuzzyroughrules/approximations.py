@@ -9,6 +9,13 @@ class LowerApproximation:
         self.implicator = implicator
 
     def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        """
+        Returns a 1d array where location x gives the membership of x to the
+        lower approximation of its class
+        :param X: Information table
+        :param y: Labels
+        :return:
+        """
         rel_matrix_x = fo.triangular_similarity(X, X)
         rel_matrix_y = fo.discernibility_matrix(y, y)
         return fo.get_ind_low_apr(rel_matrix_x, rel_matrix_y)
