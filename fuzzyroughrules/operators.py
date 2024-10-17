@@ -55,9 +55,15 @@ class RelationTypes(Enum):
 def triangular_relation(
         x: np.ndarray,
         y: np.ndarray,
-        slopes: np.ndarray[float],
-        rel_types: np.ndarray[RelationTypes]
+        slopes: np.ndarray[float] = None,
+        rel_types: np.ndarray[RelationTypes] = None
 ):
+    # setting default arguments
+    if slopes is None:
+        slopes = np.ones(len(x), dtype=float)
+    if rel_types is None:
+        rel_types = np.array(len(x) * [RelationTypes.INDISCERNIBLE])
+
     x, y = np.atleast_2d(x), np.atleast_2d(y)
     type_divisions = {rel_type: np.where(rel_types == rel_type)[0] for rel_type in
                       [RelationTypes.DOMINATED, RelationTypes.DOMINANT, RelationTypes.INDISCERNIBLE]}
