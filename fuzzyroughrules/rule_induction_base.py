@@ -78,6 +78,8 @@ class FeatureOrdering(Protocol):
 class RuleGenerator(BaseEstimator, ClassifierMixin):
     # parameters of the model
     with_reducts: bool = True
+    apply_relabelling: bool = False
+    print_changes: bool = False
     optimise_attribute_order: bool = False
     optimise_slopes: bool = False
     slope_options: list[float] = None
@@ -124,21 +126,21 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
 
         for obj in range(self.n_samples_):
             decision_set = self.rel_matrix_y_[obj]
-            selected_types = np.full(self.n_features_in_, RelationTypes.INDISCERNIBLE, dtype=RelationTypes)
-            selected_slopes = np.ones(self.n_features_in_, dtype=float)
+            new_types = np.full(self.n_features_in_, RelationTypes.INDISCERNIBLE, dtype=RelationTypes)
+            new_slopes = np.ones(self.n_features_in_, dtype=float)
 
             if self.with_reducts:
                 for attribute in ordered_attributes:
-                    temp_types = selected_types
+                    temp_types = new_types
 
-                    # we do UNUSED separately
+                    # we do UNUSED separately because then the slopes don't matter
                     temp_types[attribute] = RelationTypes.UNUSED
                     new_granule = fo.lukasiewicz_t_norm(
-                        triangular_relation(X, X[obj], selected_slopes, temp_types),
+                        triangular_relation(X, X[obj], new_slopes, temp_types),
                         self.positive_region_[obj]
                     )
                     if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.__get_inclusion_threshold(X[obj], y[obj]):
-                        selected_types = temp_types
+                        new_types = temp_types
                         continue  # go to the next attribute
 
                     # if UNUSED is not enough, we check the other types
@@ -148,7 +150,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                             break
                         temp_types[attribute] = temp_type
                         if self.optimise_slopes:
-                            temp_slopes = selected_slopes
+                            temp_slopes = new_slopes
                             for slope in self.slope_options_:
                                 if found:
                                     break
@@ -159,21 +161,21 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                                 )
                                 if (self.inclusion_measure_.inclusion(new_granule, decision_set)
                                         > self.__get_inclusion_threshold(X[obj], y[obj])):
-                                    selected_types = temp_types
-                                    selected_slopes = temp_slopes
+                                    new_types = temp_types
+                                    new_slopes = temp_slopes
                                     found = True
                         else:  # we only need to check the default slope (i.e. 1)
                             new_granule = fo.lukasiewicz_t_norm(
-                                triangular_relation(X, X[obj], selected_slopes, temp_types),
+                                triangular_relation(X, X[obj], new_slopes, temp_types),
                                 self.positive_region_[obj]
                             )
                             if (self.inclusion_measure_.inclusion(new_granule, decision_set)
                                     > self.__get_inclusion_threshold(X[obj], y[obj])):
-                                selected_types = temp_types
+                                new_types = temp_types
                                 found = True
 
-            reducts.append(selected_types)
-            slopes.append(selected_slopes)
+            reducts.append(new_types)
+            slopes.append(new_slopes)
         return np.array(reducts), np.array(slopes)
 
     def __optimisation_procedure(self, full_dis_covering):
@@ -198,6 +200,50 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
 
         return np.array(selected)
 
+    def __relabel(self, X: np.ndarray, y: np.ndarray) -> (np.ndarray, np.ndarray):
+        """
+        Recalculates the labels of the objects in the training set X according to the result of the granular
+        approximation process. This function must run after self.positive_region_ has been calculated.
+        # todo add check for this final sentence
+
+        :param X: preprocessed dataset, but before reducts
+        :param y:
+        :return: (new labels, new positive region (approximation))
+        """
+        # start by separating out the decision classes?
+        separated_classes = [[] for _ in range(self.n_classes_)]  # contains obj( = index) separated by class
+        for obj in range(self.n_samples_):
+            separated_classes[y[obj]].append(obj)
+
+        new_y = []
+        new_gran_approx = []
+        nr_changes = 0
+
+        for obj in range(self.n_samples_):
+            best_label = y[obj]
+            best_membership = self.positive_region_[obj]  # first case -> use the solution of the optimisation problem
+            for label in range(self.n_classes_):
+                if label != y[obj]:  # second case: compare to the objects in class label
+                    temp = max(
+                        fo.lukasiewicz_t_norm(
+                            triangular_relation(X[separated_classes[label]], X[obj]),
+                            self.positive_region_[separated_classes[label]]
+                        )
+                    )
+                    if temp > best_membership:
+                        best_membership = temp
+                        best_label = label
+            if best_label != y[obj]:
+                nr_changes += 1
+            new_y.append(best_label)
+            new_gran_approx.append(best_membership)
+
+        if self.print_changes:
+            print(f"{nr_changes} labels out of {self.n_samples_} were changed.")
+            # print(new_gran_approx)
+
+        return new_y, new_gran_approx
+
     def fit(self, X: np.ndarray, y: np.ndarray, types: np.ndarray = None):
         # initialise fit
         X, y = check_X_y(X, y)
@@ -216,11 +262,13 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
 
 
         X = self.scaler_.fit_transform(X)
-        self.rel_matrix_x_ = fo.triangular_similarity(X, X)
-        self.rel_matrix_y_ = fo.discernibility_matrix(y, y)
+        # self.rel_matrix_x_ = fo.triangular_similarity(X, X)
 
         # calculate positive region and perform reducts
         self.positive_region_ = self.approximation_.get_approximation(X, y)
+        if self.apply_relabelling:
+            y, self.positive_region_ = self.__relabel(X, y)
+        self.rel_matrix_y_ = fo.discernibility_matrix(y, y)
         self.reducts_, self.slopes_ = self.__get_reducts(X, y)
 
         covering = np.zeros((self.n_samples_, self.n_samples_))
