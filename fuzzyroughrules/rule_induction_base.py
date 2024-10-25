@@ -79,6 +79,9 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     # parameters of the model
     with_reducts: bool = True
     apply_relabelling: bool = False
+    relabelling_threshold: float = 0.0
+    discard_uncertain_objects: bool = False
+    certainty_threshold: float = 0.0
     print_changes: bool = False
     optimise_attribute_order: bool = False
     optimise_slopes: bool = False
@@ -230,7 +233,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                             self.positive_region_[separated_classes[label]]
                         )
                     )
-                    if temp > best_membership:
+                    if temp > best_membership + self.relabelling_threshold:
                         best_membership = temp
                         best_label = label
             if best_label != y[obj]:
