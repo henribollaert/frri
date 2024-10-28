@@ -76,7 +76,28 @@ class FeatureOrdering(Protocol):
 # todo add parameters for t-norm and relation
 @dataclass
 class RuleGenerator(BaseEstimator, ClassifierMixin):
-    # parameters of the model
+    """ Base class for rule generation within the FRRI paradigm.
+
+
+
+    Attributes:
+        with_reducts (bool): Do we apply the feature reduction step.
+        apply_relabelling (bool): Do we apply relabelling based on the generated approximation.
+        relabelling_threshold (float): Minimum membership increase needed to trigger relabelling.
+        discard_uncertain_objects (bool): Do we discard objects that have a low membership.
+        certainty_threshold (float): Minimum membership increase needed to be allowed to be a rule.
+        print_changes (bool): Output number of relabellings to terminal.
+        optimise_attribute_order (bool): Do we optimise the order of the attributes before the reduction step.
+        optimise_slopes (bool):Do we optimise the slopes during the reduction step.
+        slope_options (list[float]): What slope options do we consider.
+        covering_threshold (float): Minimum membership of an object to a rule to be covered by it.
+        inclusion_threshold (float): Minimum degree of inclusion of a new granule in the original one during reduction.
+        priors_influence (float): In what way do the prior probabilities of the classes influence the inclusion.
+        approximation (Approximation): The approximation to use.
+        inclusion_measure (InclusionMeasure): The inclusion measure to use.
+        attribute_ordering (FeatureOrdering): The attribute ordering to use during the reduction step.
+        scaler = None
+    """
     with_reducts: bool = True
     apply_relabelling: bool = False
     relabelling_threshold: float = 0.0
