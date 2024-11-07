@@ -85,6 +85,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         apply_relabelling (bool): Do we apply relabelling based on the generated approximation.
         relabelling_threshold (float): Minimum membership increase needed to trigger relabelling.
         discard_uncertain_objects (bool): Do we discard objects that have a low membership.
+        add_uncovered_objects (bool): If we discard uncertain objects, do we add the uncovered objects as rules?
         certainty_threshold (float): Minimum membership increase needed to be allowed to be a rule.
         print_changes (bool): Output number of relabellings to terminal.
         optimise_attribute_order (bool): Do we optimise the order of the attributes before the reduction step.
@@ -102,7 +103,9 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     apply_relabelling: bool = False
     relabelling_threshold: float = 0.0
     discard_uncertain_objects: bool = False
+    add_uncovered_objects: bool = True
     certainty_threshold: float = 0.0
+    print_nr_of_rule_candidates: bool = False
     print_changes: bool = False
     optimise_attribute_order: bool = False
     optimise_slopes: bool = False
@@ -202,25 +205,41 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
             slopes.append(new_slopes)
         return np.array(reducts), np.array(slopes)
 
-    def __optimisation_procedure(self, full_dis_covering):
+    def __optimisation_procedure(
+            self,
+            full_dis_covering,
+            candidates = None,
+            uncovered = None,
+    ):
+        """
+        Rule selection step = solving of the optimisation problem
+        :param full_dis_covering: covering matrix (z_{u,v}) = d[j][i]
+        :param n_candidates: only used if we discard uncertain objects
+        :return: solution to the optimisation problem
+        """
+        if candidates is None:
+            candidates = range(self.n_samples_)
+
         dis_model = gb.Model("discrete_rule_induction")
         # print(full_dis_covering)
         rules = []
-        for r in range(self.n_samples_):
+        for _ in candidates:
             rules.append(dis_model.addVar(vtype=gb.GRB.BINARY, obj=1))
         dis_model.modelSense = gb.GRB.MINIMIZE
 
         for i in range(self.n_samples_):
-            exp = gb.quicksum([full_dis_covering[i][j] * rules[j] for j in range(self.n_samples_)])
+            if i in uncovered:
+                continue
+            exp = gb.quicksum([full_dis_covering[i][index] * rules[index] for index, _ in enumerate(candidates)])
             dis_model.addConstr(exp >= 1)  # , name='Coverage requirement'
 
         dis_model.setParam("OutputFlag", 0)
         dis_model.optimize()
 
         selected = []
-        for i in range(self.n_samples_):
-            if rules[i].x > 0.99:
-                selected.append(i)
+        for index, obj in enumerate(candidates):
+            if rules[index].x > 0.99:
+                selected.append(obj)
 
         return np.array(selected)
 
@@ -295,23 +314,42 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         self.rel_matrix_y_ = fo.discernibility_matrix(y, y)
         self.reducts_, self.slopes_ = self.__get_reducts(X, y)
 
-        covering = np.zeros((self.n_samples_, self.n_samples_))
+        rule_candidates = range(self.n_samples_)
+        if self.discard_uncertain_objects:
+            rule_candidates = []
+            for i in range(self.n_samples_):
+                # print(self.positive_region_[i])
+                if self.positive_region_[i] >= self.certainty_threshold:
+                    rule_candidates.append(i)
 
-        for i in range(self.n_samples_):
+        if self.print_nr_of_rule_candidates:
+            print(f"{len(rule_candidates)} candidates out of {self.n_samples_} possible objects")
+
+        covering = np.zeros((len(rule_candidates), self.n_samples_))
+
+        for index, obj in enumerate(rule_candidates):
             current_covering = fo.lukasiewicz_t_norm(
                 triangular_relation(
                     X,
-                    X[i],
-                    self.slopes_[i],
-                    self.reducts_[i]
+                    X[obj],
+                    self.slopes_[obj],
+                    self.reducts_[obj]
                 ),
-                self.positive_region_[i]
+                self.positive_region_[obj]
             )
             if len(current_covering.shape) > 1:
                 current_covering = current_covering.T
-            covering[i, :] = (1 * (current_covering > self.covering_threshold))
+            covering[index, :] = (1 * (current_covering > self.covering_threshold))
 
-        selected_indexes = self.__optimisation_procedure(covering.T)
+        uncovered_objects = []
+        if np.any(np.sum(covering, axis=0) == 0):
+            uncovered_objects = np.flatnonzero(np.sum(covering, axis=0) == 0)
+            if self.print_nr_of_rule_candidates:
+                print(f"{np.count_nonzero(np.sum(covering, axis=0) == 0)} objects remain uncovered.")
+                print("These objects will be removed from the covering matrix and can be added "
+                      "as rules after the rule selection")
+
+        selected_indexes = self.__optimisation_procedure(covering.T, rule_candidates, uncovered_objects)
         self.rules_ = [Rule(
             X[i],
             self.reducts_[i],
@@ -319,6 +357,15 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
             self.positive_region_[i],
             y[i]
         ) for i in selected_indexes]
+        if self.add_uncovered_objects:
+            for i in uncovered_objects:
+                self.rules_.append(Rule(
+                    X[i],
+                    self.reducts_[i],
+                    self.slopes_[i],
+                    self.positive_region_[i],
+                    y[i]
+                ))
 
         self.n_rules_ = np.size(selected_indexes)
 
