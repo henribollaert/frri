@@ -5,37 +5,7 @@ from re import search
 import os
 import numpy as np
 
-
-def get_dataset(
-        folder_path: Path,
-        keyword: str,
-        remove_cat: bool = False,
-        get_datatypes: bool = False) -> tuple[np.ndarray, ...]:
-    """
-    Returns the unique dataset in the folder indicated by folder_path that contains the keyword.
-    Categorical features can be removed, and the datatypes can also be returned
-    :param folder_path: path where the data is located
-    :param keyword: keyword contained in the name of the dataset
-    :param remove_cat: should categorical features be removed (except for the decision attribute)
-    :param get_datatypes: should we return the
-    :return: values of conditional features, values of decision attribute,
-    possibly the datatypes of the conditional features
-    """
-    set_list = [_ for _ in folder_path.iterdir() if keyword in _.name]
-    assert len(set_list) == 1, f'{len(set_list)} files with {keyword} in their name.'
-
-    dataset = pd.read_csv(set_list[0], header=None, comment='@')
-    if remove_cat:
-        nums = [t != 'object' for t in dataset.dtypes]
-        nums[-1] = False
-        x_dataset = dataset.loc[:, nums]
-    else:
-        x_dataset = dataset.iloc[:, :-1]
-    if get_datatypes:
-        result = x_dataset.values, dataset.iloc[:, -1].values, x_dataset.dtypes.values
-    else:
-        result = x_dataset.values, dataset.iloc[:, -1].values
-    return result
+from hhelper.data_loader import get_dataset
 
 
 class RuleInductionModel(Protocol):
@@ -79,6 +49,7 @@ def test_save(
         encode_labels: bool = False,
         use_data_types: bool = True,  # todo this can be handled better (* operator?)
         save_probas: bool = False,
+        timing: bool = False  # todo implement timing
 ) -> None:
     """
     This method runs a given model on a collection of data sets and saves the predictions
@@ -94,6 +65,7 @@ def test_save(
     :param nr_of_folds: number of folds for the cross-validation
     :param encode_labels: should we encode the labels as ints and save the dict to a file?
     :param save_probas: save probabilities instead of just the productions
+    :param timing: should we track the time each run takes?
     :return: Nothing
     """
     for dataset_dir in datasets_folder.iterdir():
@@ -124,13 +96,13 @@ def test_save(
             if not os.path.exists(fold_result_path):
                 os.makedirs(fold_result_path)
 
-            # get the train and test sets
-            x_train, y_train, t_train = get_dataset(dataset_dir, f"{fold + 1}tra", get_datatypes=True)
-            x_test, y_test = get_dataset(dataset_dir, f"{fold + 1}tst", get_datatypes=False)
-
             # skip if we already have results for these parameters
             if (fold_result_path / f"fold{fold + 1}.dat").is_file():
                 continue
+
+            # get the train and test sets
+            x_train, y_train, t_train = get_dataset(dataset_dir, f"{fold + 1}tra", get_datatypes=True)
+            x_test, y_test = get_dataset(dataset_dir, f"{fold + 1}tst", get_datatypes=False)
 
             if encode_labels:
                 # encode the labels to ints
@@ -147,11 +119,15 @@ def test_save(
             try:
                 # fit to the training set
                 if use_data_types:
+                    if timing:
+                        time.start()
                     model.fit(x_train, y_train, t_train)
                 else:
                     model.fit(x_train, y_train)
                 if print_info:
                     lines.append(model.get_info())
+                if timing:
+                    lines.append(f"@execution_time: {}")
             except Exception as err:
                 lines.extend([f"Error while training on fold {fold + 1}.", str(err)])
                 if verbose:
@@ -395,21 +371,3 @@ def balanced_accuracy_score(y_true: np.ndarray, y_pred: np.ndarray) -> np.float6
     )
 
     return balanced_acc
-
-
-def bold(data, optimum='max', format_string="%.3f"):
-    """
-    Returns a pandas dataframe with formatted strings and bolded maximaL values.
-    :param data:
-    :param optimum:
-    :param format_string:
-
-    :return: data with bolded specified optimum
-    """
-    if optimum == 'max':
-        optima = data != data.max()
-    else:
-        optima = data != data.min()
-    bolded = data.apply(lambda x: "\\textbf{%s}" % format_string % x)
-    formatted = data.apply(lambda x: format_string % x)
-    return formatted.where(optima, bolded)
