@@ -50,7 +50,8 @@ def test_save(
         encode_labels: bool = False,
         use_data_types: bool = True,  # todo this can be handled better (* operator?)
         save_probas: bool = False,
-        timing: bool = False  # todo implement timing
+        timing: bool = False,
+        training: bool = False,
 ) -> None:
     """
     This method runs a given model on a collection of data sets and saves the predictions
@@ -67,6 +68,7 @@ def test_save(
     :param encode_labels: should we encode the labels as ints and save the dict to a file?
     :param save_probas: save probabilities instead of just the productions
     :param timing: should we track the time each run takes?
+    :param training: true if we should calculate the training accuracy
     :return: Nothing
     """
     for dataset_dir in datasets_folder.iterdir():
@@ -103,7 +105,10 @@ def test_save(
 
             # get the train and test sets
             x_train, y_train, t_train = get_dataset(dataset_dir, f"{fold + 1}tra", get_datatypes=True)
-            x_test, y_test = get_dataset(dataset_dir, f"{fold + 1}tst", get_datatypes=False)
+            if training:
+                x_test, y_test = x_train, y_train
+            else:
+                x_test, y_test = get_dataset(dataset_dir, f"{fold + 1}tst", get_datatypes=False)
 
             if encode_labels:
                 # encode the labels to ints
