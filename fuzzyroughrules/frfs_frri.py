@@ -47,8 +47,10 @@ class FRFSRuleGenerator(RuleGenerator):
 
     def fit(self, X: np.ndarray, y: np.ndarray, types: np.ndarray = None):
         X, y = check_X_y(X, y)
-        n_features = X.shape[1]
-        frfs = self.frfs_type(n_features=np.rint(n_features*self.attribute_ratio))
+        n_features = 0
+        if i := np.rint(X.shape[1]*self.attribute_ratio) > 1:
+            n_features = i
+        frfs = self.frfs_type(n_features=n_features)
         self.preprocessor_ = frfs(X, y)
         X = self.preprocessor_(X)
 

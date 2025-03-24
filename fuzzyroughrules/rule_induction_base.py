@@ -113,6 +113,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     covering_threshold: float = 1e-6
     inclusion_threshold: float = 1 - 1e-6
     priors_influence: float = 0
+    use_gran_approx:bool = False
     approximation: Approximation = None
     inclusion_measure: InclusionMeasure = None
     attribute_ordering: FeatureOrdering = None
@@ -142,6 +143,21 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         if not self.priors_influence:
             return self.inclusion_threshold
         return (self.priors_[label] * self.priors_influence + 1 - self.priors_influence) * self.inclusion_threshold  # high scale
+
+    def __inclusion_criterion(self, new_granule, obj, X, y) -> bool:
+        """
+        Returns where we should stop the reduction step on this object with this granule.
+
+        :param new_granule: newly built granule (as open as possible)
+        :param obj: object that is being reduced
+        :param X: data table
+        :param y: labels
+        :return: true if we should stop the reduction step
+        """
+        if self.use_gran_approx:
+            return ...  # self.inclusion_measure_.inclusion(new_granule, ...)# todo ) > self.__get_inclusion_threshold(X[obj], y[obj])
+        else:
+            return self.inclusion_measure_.inclusion(new_granule, self.rel_matrix_y_[obj]) > self.__get_inclusion_threshold(X[obj], y[obj])
 
     def __get_reducts(self, X, y):
         reducts = []

@@ -21,6 +21,17 @@ class ImplicatorInclusion:
         B = np.squeeze(B)
         return np.min(self.implicator(A, B))
 
+class StrictInclusion:
+    """
+    Fuzzy sets are modelled as numpy arrays that contain the membership of each element of the dataset (incl 0's).
+
+    this class models the strict inclusion of fuzzy sets, i.e. A subset of B if A(x) \leq B(x) for all x.
+    """
+
+    def inclusion(self, A: np.ndarray, B: np.ndarray) -> float:
+        return np.all(np.less_equal(np.squeeze(A), np.squeeze(B)))
+
+
 
 class OWAImplicatorInclusion:
     """
