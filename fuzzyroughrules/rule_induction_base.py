@@ -48,14 +48,14 @@ class OldRule:
         self.decision = decision
 
 
-@dataclass
+@dataclass(repr=True, frozen=True)
 class Rule:
     antecedent: np.ndarray
     reducts: np.ndarray
     slopes: np.ndarray
     credibility: np.ndarray
     decision: int
-    as_string: str = field(default_factory=lambda: "Not yet extracted")
+    as_string: str = field(default_factory=lambda: "Not yet extracted")  # todo implement
 
 
 class Approximation(Protocol):
@@ -77,8 +77,6 @@ class FeatureOrdering(Protocol):
 @dataclass
 class RuleGenerator(BaseEstimator, ClassifierMixin):
     """ Base class for rule generation within the FRRI paradigm.
-
-
 
     Attributes:
         with_reducts (bool): Do we apply the feature reduction step.
@@ -113,7 +111,6 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     covering_threshold: float = 1e-6
     inclusion_threshold: float = 1 - 1e-6
     priors_influence: float = 0
-    use_gran_approx:bool = False
     approximation: Approximation = None
     inclusion_measure: InclusionMeasure = None
     attribute_ordering: FeatureOrdering = None
@@ -130,10 +127,10 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                 raise ValueError(f"RuleGenerator does not have a {key} parameter.")
         return self
 
-    def __optimise_feature_order(self, X, y, t) -> np.ndarray[int]:  # todo implement
+    def _optimise_feature_order(self, X, y, t) -> np.ndarray[int]:  # todo implement
         return self.attribute_ordering_.order_features(X, y, t)
 
-    def __get_inclusion_threshold(self, obj, label) -> float:
+    def _get_inclusion_threshold(self, obj, label) -> float:
         """
 
         :param obj: object
@@ -144,26 +141,11 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
             return self.inclusion_threshold
         return (self.priors_[label] * self.priors_influence + 1 - self.priors_influence) * self.inclusion_threshold  # high scale
 
-    def __inclusion_criterion(self, new_granule, obj, X, y) -> bool:
-        """
-        Returns where we should stop the reduction step on this object with this granule.
-
-        :param new_granule: newly built granule (as open as possible)
-        :param obj: object that is being reduced
-        :param X: data table
-        :param y: labels
-        :return: true if we should stop the reduction step
-        """
-        if self.use_gran_approx:
-            return ...  # self.inclusion_measure_.inclusion(new_granule, ...)# todo ) > self.__get_inclusion_threshold(X[obj], y[obj])
-        else:
-            return self.inclusion_measure_.inclusion(new_granule, self.rel_matrix_y_[obj]) > self.__get_inclusion_threshold(X[obj], y[obj])
-
-    def __get_reducts(self, X, y):
+    def _get_reducts(self, X, y):
         reducts = []
         slopes = []
         if self.optimise_attribute_order:
-            ordered_attributes = self.__optimise_feature_order(X, y, self.types_)
+            ordered_attributes = self._optimise_feature_order(X, y, self.types_)
         else:
             ordered_attributes = np.arange(self.n_features_in_)
 
@@ -182,7 +164,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                         triangular_relation(X, X[obj], new_slopes, temp_types),
                         self.positive_region_[obj]
                     )
-                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self.__get_inclusion_threshold(X[obj], y[obj]):
+                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self._get_inclusion_threshold(X[obj], y[obj]):
                         new_types = temp_types
                         continue  # go to the next attribute
 
@@ -203,7 +185,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                                     self.positive_region_[obj]
                                 )
                                 if (self.inclusion_measure_.inclusion(new_granule, decision_set)
-                                        > self.__get_inclusion_threshold(X[obj], y[obj])):
+                                        > self._get_inclusion_threshold(X[obj], y[obj])):
                                     new_types = temp_types
                                     new_slopes = temp_slopes
                                     found = True
@@ -213,7 +195,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                                 self.positive_region_[obj]
                             )
                             if (self.inclusion_measure_.inclusion(new_granule, decision_set)
-                                    > self.__get_inclusion_threshold(X[obj], y[obj])):
+                                    > self._get_inclusion_threshold(X[obj], y[obj])):
                                 new_types = temp_types
                                 found = True
 
@@ -221,7 +203,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
             slopes.append(new_slopes)
         return np.array(reducts), np.array(slopes)
 
-    def __optimisation_procedure(
+    def _optimisation_procedure(
             self,
             full_dis_covering,
             candidates = None,
@@ -259,7 +241,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
 
         return np.array(selected)
 
-    def __relabel(self, X: np.ndarray, y: np.ndarray) -> (np.ndarray, np.ndarray):
+    def _relabel(self, X: np.ndarray, y: np.ndarray) -> (np.ndarray, np.ndarray):
         """
         Recalculates the labels of the objects in the training set X according to the result of the granular
         approximation process. This function must run after self.positive_region_ has been calculated.
@@ -326,9 +308,9 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         # calculate positive region and perform reducts
         self.positive_region_ = self.approximation_.get_approximation(X, y)
         if self.apply_relabelling:
-            y, self.positive_region_ = self.__relabel(X, y)
+            y, self.positive_region_ = self._relabel(X, y)
         self.rel_matrix_y_ = fo.discernibility_matrix(y, y)
-        self.reducts_, self.slopes_ = self.__get_reducts(X, y)
+        self.reducts_, self.slopes_ = self._get_reducts(X, y)
 
         rule_candidates = range(self.n_samples_)
         if self.discard_uncertain_objects:
@@ -365,7 +347,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                 print("These objects will be removed from the covering matrix and can be added "
                       "as rules after the rule selection")
 
-        selected_indexes = self.__optimisation_procedure(covering.T, rule_candidates, uncovered_objects)
+        selected_indexes = self._optimisation_procedure(covering.T, rule_candidates, uncovered_objects)
         self.rules_ = [Rule(
             X[i],
             self.reducts_[i],
@@ -474,27 +456,5 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
             return f"@non-overlap-rules-base-NOT-YET-FITTED"
 
     def get_rules_as_string(self) -> list[str]:
-        if self.optimise_slopes:
-            print("Extracting rules not yet supported for multiple slopes, just using default slope value (i.e., 1).")
-            # implementation was:
-            # left_bounds_t = holding_points - np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
-            # right_bounds_t = holding_points + np.tile(self.slopes * credibility, (self.n_attributes, 1)).T
-            # I just removed the slopes
-        old_rules = []
-        for rule in self.rules_:
-            left_bound_t = rule.antecedent - np.tile(rule.credibility, (self.n_features_in_, 1)).T
-            right_bound_t = rule.antecedent + np.tile(rule.credibility, (self.n_features_in_, 1)).T
-            left_bound = np.squeeze(self.scaler_.inverse_transform(left_bound_t))
-            right_bound = np.squeeze(self.scaler_.inverse_transform(right_bound_t))
+        return [repr(rule) for rule in self.rules_]
 
-            created_old_rule = OldRule(self.n_features_in_)
-            for j in range(self.n_features_in_):
-                if rule.reducts[j] is RelationTypes.INDISCERNIBLE:
-                    created_old_rule.add_condition(j, 'i', left_bound[j], right_bound[j])
-                elif rule.reducts[j] == RelationTypes.DOMINATED:
-                    created_old_rule.add_condition(j, 'l', left_bound[j], right_bound[j])
-                elif rule.reducts[j] == RelationTypes.DOMINANT:
-                    created_old_rule.add_condition(j, 'r', left_bound[j], right_bound[j])
-            created_old_rule.add_decision(rule.decision)
-            old_rules.append(created_old_rule)
-        return [f"{rule.condition_json}, class: {rule.decision}" for rule in old_rules]
