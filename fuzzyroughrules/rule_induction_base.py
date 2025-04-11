@@ -19,35 +19,6 @@ import importlib
 
 importlib.reload(fo)
 
-
-class OldRule:
-    def __init__(self, size):
-        self.size = size
-        self.left_bounds = inf_val * np.ones(self.size)
-        self.right_bounds = inf_val * np.ones(self.size)
-        self.condition_json = []
-        self.decision = 0
-
-    # todo fix: use RelationTypes here
-    def add_condition(self, attribute, type, left_bound, right_bound):
-        if type == 'l':
-            self.left_bounds[attribute] = left_bound
-            pair = {"attribute": attribute, "type": type, "bounds": [left_bound, ]}
-            self.condition_json.append(pair)
-        if type == 'r':
-            self.right_bounds[attribute] = right_bound
-            pair = {"attribute": attribute, "type": type, "bounds": [right_bound, ]}
-            self.condition_json.append(pair)
-        if type == 'i':
-            self.left_bounds[attribute] = left_bound
-            self.right_bounds[attribute] = right_bound
-            pair = {"attribute": attribute, "type": type, "bounds": [left_bound, right_bound]}
-            self.condition_json.append(pair)
-
-    def add_decision(self, decision):
-        self.decision = decision
-
-
 @dataclass(repr=True, frozen=True)
 class Rule:
     antecedent: np.ndarray
@@ -55,7 +26,6 @@ class Rule:
     slopes: np.ndarray
     credibility: np.ndarray
     decision: int
-    as_string: str = field(default_factory=lambda: "Not yet extracted")  # todo implement
 
 
 class Approximation(Protocol):
@@ -132,10 +102,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
 
     def _get_inclusion_threshold(self, obj, label) -> float:
         """
-
-        :param obj: object
-        :param label: label
-        :return:
+        Get inclusion threshold.
         """
         if not self.priors_influence:
             return self.inclusion_threshold
@@ -365,8 +332,6 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                     y[i]
                 ))
 
-        self.n_rules_ = np.size(selected_indexes)
-
         return self
 
     def predict_proba(self, X: np.ndarray, normalized: bool = True) -> np.ndarray:
@@ -405,53 +370,17 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         check_is_fitted(self)
         return self.classes_[np.argmax(self.predict_proba(X, normalized=False), 1)]
 
-    # def plot_rules2d(self, indeces):
-    #     i = indeces[0]
-    #     j = indeces[1]
-    #     fig, ax = plt.subplots(1)
-    #     colors = np.random.rand(self.n_features_in_, 3)
-    #     ax.scatter(self.X[:, i], self.X[:, j], c=colors[self.y])
-    #     ylims = ax.get_ylim()
-    #     xlims = ax.get_xlim()
-    #     leftylim = ylims[0]
-    #     rightylim = ylims[1]
-    #     leftxlim = xlims[0]
-    #     rightxlim = xlims[1]
-    #
-    #     for k in range(self.n_rules):
-    #         rule = self.rules[k]
-    #         if rule.left_bounds[i] < inf_val:
-    #             rulexleft = rule.left_bounds[0]
-    #         else:
-    #             rulexleft = leftxlim
-    #         if rule.right_bounds[i] < inf_val:
-    #             rulexright = rule.right_bounds[0]
-    #         else:
-    #             rulexright = rightxlim
-    #         if rule.left_bounds[j] < inf_val:
-    #             ruleyleft = rule.left_bounds[1]
-    #         else:
-    #             ruleyleft = leftylim
-    #         if rule.right_bounds[j] < inf_val:
-    #             ruleyright = rule.right_bounds[1]
-    #         else:
-    #             ruleyright = rightylim
-    #
-    #         col = colors[self.y[self.selected_indexes[k]]]
-    #         rect = patches.Rectangle((rulexleft, ruleyleft),
-    #                                  rulexright - rulexleft,
-    #                                  ruleyright - ruleyleft,
-    #                                  linewidth=1, edgecolor=col, facecolor='none')
-    #
-    #         ax.add_patch(rect)
-    #     return ax
-
     def get_info(self) -> str:
         return str(self)
 
+    def average_rule_length(self):
+        if not hasattr(self, "approximation_"):
+            return 0
+        return np.sum(np.array([rule.reducts for rule in self.rules_]) != RelationTypes.UNUSED) / len(self.rules_)
+
     def __str__(self) -> str:
         if hasattr(self, "approximation_"):
-            return f"@non-overlap-rules-base\n@approximation: {self.approximation_}\n@scaler: {self.scaler}"
+            return f"@non-overlap-rules-base\n@approximation: {self.approximation_}\n@scaler: {self.scaler}\n@num_rules: {len(self.rules_)}\n@average-length: {self.average_rule_length()}"
         else:
             return f"@non-overlap-rules-base-NOT-YET-FITTED"
 

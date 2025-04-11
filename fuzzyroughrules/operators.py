@@ -62,6 +62,10 @@ class RelationTypes(Enum):
     DOMINANT = -1
     INDISCERNIBLE = 2
 
+    def __repr__(self):
+        cls_name = self.__class__.__name__
+        return f'{cls_name}.{self.name}'
+
 
 def triangular_relation(
         x: np.ndarray,
