@@ -21,7 +21,7 @@ class ImplicatorInclusion:
         B = np.squeeze(B)
         return np.min(self.implicator(A, B))
 
-class StrictInclusion:
+class StrictFuzzyInclusion:
     """
     Fuzzy sets are modelled as numpy arrays that contain the membership of each element of the dataset (incl 0's).
 
