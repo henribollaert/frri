@@ -1,5 +1,5 @@
 from typing import Protocol
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 
 import numpy as np
 from sklearn.base import BaseEstimator, ClassifierMixin
@@ -24,7 +24,7 @@ class Rule:
     antecedent: np.ndarray
     reducts: np.ndarray
     slopes: np.ndarray
-    credibility: np.ndarray
+    credibility: int
     decision: int
 
 
@@ -49,22 +49,22 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     """ Base class for rule generation within the FRRI paradigm.
 
     Attributes:
-        with_reducts (bool): Do we apply the feature reduction step.
-        apply_relabelling (bool): Do we apply relabelling based on the generated approximation.
-        relabelling_threshold (float): Minimum membership increase needed to trigger relabelling.
-        discard_uncertain_objects (bool): Do we discard objects that have a low membership.
-        add_uncovered_objects (bool): If we discard uncertain objects, do we add the uncovered objects as rules?
-        certainty_threshold (float): Minimum membership increase needed to be allowed to be a rule.
-        print_changes (bool): Output number of relabellings to terminal.
-        optimise_attribute_order (bool): Do we optimise the order of the attributes before the reduction step.
-        optimise_slopes (bool):Do we optimise the slopes during the reduction step.
-        slope_options (list[float]): What slope options do we consider.
-        covering_threshold (float): Minimum membership of an object to a rule to be covered by it.
-        inclusion_threshold (float): Minimum degree of inclusion of a new granule in the original one during reduction.
-        priors_influence (float): In what way do the prior probabilities of the classes influence the inclusion.
-        approximation (Approximation): The approximation to use.
-        inclusion_measure (InclusionMeasure): The inclusion measure to use.
-        attribute_ordering (FeatureOrdering): The attribute ordering to use during the reduction step.
+        with_reducts (bool): Do we apply the feature reduction step. (default = True)
+        apply_relabelling (bool): Do we apply relabelling based on the generated approximation. (default = False)
+        relabelling_threshold (float): Minimum membership increase needed to trigger relabelling. (default = 0.0)
+        discard_uncertain_objects (bool): Do we discard objects that have a low membership. (default = False)
+        add_uncovered_objects (bool): If we discard uncertain objects, do we add the uncovered objects as rules? (default = True)
+        certainty_threshold (float): Minimum membership increase needed to be allowed to be a rule. (default = 0.0)
+        print_changes (bool): Output number of relabellings to terminal. (default = False)
+        optimise_attribute_order (bool): Do we optimise the order of the attributes before the reduction step. (default = False)
+        optimise_slopes (bool):Do we optimise the slopes during the reduction step. (default = False)
+        slope_options (list[float]): What slope options do we consider. (default = None)
+        covering_threshold (float): Minimum membership of an object to a rule to be covered by it. (default = 1e-6)
+        inclusion_threshold (float): Minimum degree of inclusion of a new granule in the original one during reduction. (default = 1 - 1e-6)
+        priors_influence (float): In what way do the prior probabilities of the classes influence the inclusion. (default = 0)
+        approximation (Approximation): The approximation to use. (default = LowerApproximation())
+        inclusion_measure (InclusionMeasure): The inclusion measure to use. (default = ImplicatorInclusion())
+        attribute_ordering (FeatureOrdering): The attribute ordering to use during the reduction step. (default = QuickReduct())
         scaler = None
     """
     with_reducts: bool = True
@@ -84,6 +84,8 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     approximation: Approximation = None
     inclusion_measure: InclusionMeasure = None
     attribute_ordering: FeatureOrdering = None
+    matching_tnorm = None
+    covering_tnorm = None
     scaler = None
 
     def set_params(self, **params):
@@ -386,4 +388,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
 
     def get_rules_as_string(self) -> list[str]:
         return [repr(rule) for rule in self.rules_]
+
+    def get_rules(self) -> np.ndarray:
+        return np.array(self.rules_)
 

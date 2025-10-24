@@ -5,6 +5,7 @@ from re import search
 import os
 import numpy as np
 from timeit import default_timer as timer
+import pickle
 
 from hhelper.data_loader import get_dataset
 
@@ -25,6 +26,9 @@ class RuleInductionModel(Protocol):
     def get_rules_as_string(self) -> list[str]:
         ...
 
+    def get_rules(self) -> np.ndarray:
+        ...
+
 
 def skip(name: str, include: Optional[list[str]], exclude: Optional[list[str]]):
     """
@@ -41,7 +45,7 @@ def test_save(
         model: RuleInductionModel,
         datasets_folder: Path,
         results_folder: Path,
-        get_rules: bool = True,
+        get_rules: bool|str = "pickle",
         print_info: bool = False,
         exclude: Optional[list[str]] = None,
         include: Optional[list[str]] = None,
@@ -157,7 +161,10 @@ def test_save(
                         print(lines)
                 finally:
                     # save the rules
-                    if get_rules:
+                    if get_rules == "pickle":
+                        with open(fold_result_path / f"rules_fold{fold + 1}.pkl", 'wb') as f:
+                            pickle.dump(model.get_rules(), f)
+                    elif get_rules or get_rules == "string":
                         with open(fold_result_path / f"rules_fold{fold + 1}.dat", 'w') as f:
                             for item in model.get_rules_as_string():
                                 f.write(f"{item}\n")
@@ -355,3 +362,58 @@ def count_attributes(file: Path, counter: str = ',') -> list[int]:
         for line in f.readlines():
             nrs.append(line.count(counter))
     return nrs
+
+"""
+TODO: BELOW is the new way (from 11/04/2025) to count rules, after removing support for the Old_Rule class. 
+The average rule length (and even the amount of rules) is now included in the metadata of the results.
+"""
+
+# todo
+
+def new_count_all_attributes(results_folder: Path,
+                         exclude: Optional[list[str]] = None,
+                         include: Optional[list[str]] = None,
+                         metric=np.average,
+                         counter: str = ',',
+                         nr_of_folds: int = 10,
+                         verbose: bool = False) -> dict[str, float]:
+    """
+    Counts the average metric(number of attributes) in the rules generated
+    for achieving the results in the results folder.
+    SO if metric is median, we calculate the median on each fold and then return the average median
+    rule length.
+    :param metric: summary metric to apply to the list of lengths
+    :param counter: str that gets counted on every line todo def make prettier
+    :param results_folder: path to the folder containing the results and the rules
+    :param exclude: data sets to exclude
+    :param include: data sets to include
+    :param nr_of_folds: number of folds used in cross-validation
+    :param verbose: should we print the name of the data set on which we are counting the rules?
+    :return: dictionary of the average number of attributes in the rules for each data set
+    """
+    if exclude is None:
+        exclude = ['abalone']
+    amount_of_attributes = {}
+    for dataset_dir in results_folder.iterdir():
+        if dataset_dir.name[0] == "." or skip(dataset_dir.name, include, exclude):
+            continue
+
+        if verbose:
+            print(dataset_dir.name)
+
+        dataset_result_path = results_folder / dataset_dir.name
+
+        # create dictionaries to save results of this dataset
+        sum_of_attributes = 0
+        for fold in range(nr_of_folds):
+            # look up the folder for the results on this fold of the dataset
+            res = ...  # todo
+            sum_of_attributes += res
+
+        # add scores to the dictionary
+        amount_of_attributes[dataset_dir.name] = sum_of_attributes / nr_of_folds
+        if verbose:
+            print(amount_of_attributes[dataset_dir.name])
+
+    return amount_of_attributes
+
