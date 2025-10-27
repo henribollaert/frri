@@ -337,6 +337,19 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         return self
 
     def predict_proba(self, X: np.ndarray, normalized: bool = True) -> np.ndarray:
+        X, credibility_predictions = self.pre_predict(X)
+
+        # sum credibility for each class
+        cumulative_credibility = np.zeros((X.shape[0], self.n_classes_))
+        for i in range(self.n_classes_):
+            if len(credibility_predictions[i]) != 0:  # easy fix for 0 size array problem!
+                cumulative_credibility[:, i] = np.max(np.array(credibility_predictions[i]), 0)
+        if normalized:
+            cumulative_credibility = normalize(cumulative_credibility, norm='l1')
+
+        return cumulative_credibility
+
+    def pre_predict(self, X: np.ndarray) -> tuple[object, list]:
         check_is_fitted(self)
         # rescale X
         X = check_array(X)
@@ -357,16 +370,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
                     rule.credibility
                 ).reshape((len(X_test)))
             )
-
-        # sum credibility for each class
-        cumulative_credibility = np.zeros((X.shape[0], self.n_classes_))
-        for i in range(self.n_classes_):
-            if len(credibility_predictions[i]) != 0:  # easy fix for 0 size array problem!
-                cumulative_credibility[:, i] = np.max(np.array(credibility_predictions[i]), 0)
-        if normalized:
-            cumulative_credibility = normalize(cumulative_credibility, norm='l1')
-
-        return cumulative_credibility
+        return X, credibility_predictions
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         check_is_fitted(self)
