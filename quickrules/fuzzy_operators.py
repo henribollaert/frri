@@ -11,6 +11,22 @@ class MinTNorm:
         return "Minimum t-norm"
 
 
+class MaxTNorm:
+    def __call__(self, a, b):
+        return max(a, b)
+
+    def __repr__(self):
+        return "Maximum t-conorm"
+
+
+class LukasiewiczTNorm:
+    def __call__(self, a, b):
+        return max(0, a + b - 1)
+
+    def __repr__(self):
+        return "Lukasiewicz t-norm"
+
+
 class KleeneDienesImplicator:
     def __call__(self, a, b):
         return max(1 - a, b)

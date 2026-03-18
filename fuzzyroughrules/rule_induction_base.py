@@ -1,0 +1,398 @@
+from typing import Protocol
+from dataclasses import dataclass
+
+import numpy as np
+from sklearn.base import BaseEstimator, ClassifierMixin
+from sklearn.preprocessing import normalize, MinMaxScaler
+from sklearn.utils.multiclass import check_classification_targets
+from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
+import gurobipy as gb
+from fuzzyroughrules.operators import RelationTypes, triangular_relation, ImplicatorInclusion
+from fuzzyroughrules.approximations import LowerApproximation
+from fuzzyroughrules.feature_preprocessors import QuickReduct
+
+np.set_printoptions(formatter={'float': lambda x: "{0:0.5f}".format(x)})
+
+inf_val = float('Inf')
+import fuzzyroughrules.fuzzy_operators as fo
+import importlib
+
+importlib.reload(fo)
+
+@dataclass(repr=True, frozen=True)
+class Rule:
+    antecedent: np.ndarray
+    reducts: np.ndarray
+    slopes: np.ndarray
+    credibility: int
+    decision: int
+
+
+class Approximation(Protocol):
+    def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
+        ...
+
+
+class InclusionMeasure(Protocol):
+    def inclusion(self, A: np.ndarray, B: np.ndarray) -> float:
+        ...
+
+
+class FeatureOrdering(Protocol):
+    def order_features(self, x: np.ndarray, y: np.ndarray, t: np.ndarray) -> np.ndarray[int]:
+        ...
+
+
+# todo add parameters for t-norm and relation
+@dataclass
+class RuleGenerator(BaseEstimator, ClassifierMixin):
+    """ Base class for rule generation within the FRRI paradigm.
+
+    Attributes:
+        with_reducts (bool): Do we apply the feature reduction step. (default = True)
+        apply_relabelling (bool): Do we apply relabelling based on the generated approximation. (default = False)
+        relabelling_threshold (float): Minimum membership increase needed to trigger relabelling. (default = 0.0)
+        discard_uncertain_objects (bool): Do we discard objects that have a low membership. (default = False)
+        add_uncovered_objects (bool): If we discard uncertain objects, do we add the uncovered objects as rules? (default = True)
+        certainty_threshold (float): Minimum membership increase needed to be allowed to be a rule. (default = 0.0)
+        print_changes (bool): Output number of relabellings to terminal. (default = False)
+        optimise_attribute_order (bool): Do we optimise the order of the attributes before the reduction step. (default = False)
+        optimise_slopes (bool):Do we optimise the slopes during the reduction step. (default = False)
+        slope_options (list[float]): What slope options do we consider. (default = None)
+        covering_threshold (float): Minimum membership of an object to a rule to be covered by it. (default = 1e-6)
+        inclusion_threshold (float): Minimum degree of inclusion of a new granule in the original one during reduction. (default = 1 - 1e-6)
+        priors_influence (float): In what way do the prior probabilities of the classes influence the inclusion. (default = 0)
+        approximation (Approximation): The approximation to use. (default = LowerApproximation())
+        inclusion_measure (InclusionMeasure): The inclusion measure to use. (default = ImplicatorInclusion())
+        attribute_ordering (FeatureOrdering): The attribute ordering to use during the reduction step. (default = QuickReduct())
+        scaler = None
+    """
+    with_reducts: bool = True
+    apply_relabelling: bool = False
+    relabelling_threshold: float = 0.0
+    discard_uncertain_objects: bool = False
+    add_uncovered_objects: bool = True
+    certainty_threshold: float = 0.0
+    print_nr_of_rule_candidates: bool = False
+    print_changes: bool = False
+    optimise_attribute_order: bool = False
+    optimise_slopes: bool = False
+    slope_options: list[float] = None
+    covering_threshold: float = 1e-6
+    inclusion_threshold: float = 1 - 1e-6
+    priors_influence: float = 0
+    approximation: Approximation = None
+    inclusion_measure: InclusionMeasure = None
+    attribute_ordering: FeatureOrdering = None
+    matching_tnorm = None
+    covering_tnorm = None
+    scaler = None
+
+    def set_params(self, **params):
+        if not params:
+            return self
+
+        for key, value in params.items():
+            if hasattr(self, key):
+                setattr(self, key, value)
+            else:
+                raise ValueError(f"RuleGenerator does not have a {key} parameter.")
+        return self
+
+    def _optimise_feature_order(self, X, y, t) -> np.ndarray[int]:  # todo implement
+        return self.attribute_ordering_.order_features(X, y, t)
+
+    def _get_inclusion_threshold(self, obj, label) -> float:
+        """
+        Get inclusion threshold.
+        """
+        if not self.priors_influence:
+            return self.inclusion_threshold
+        return (self.priors_[label] * self.priors_influence + 1 - self.priors_influence) * self.inclusion_threshold  # high scale
+
+    def _get_reducts(self, X, y):
+        reducts = []
+        slopes = []
+        if self.optimise_attribute_order:
+            ordered_attributes = self._optimise_feature_order(X, y, self.types_)
+        else:
+            ordered_attributes = np.arange(self.n_features_in_)
+
+        for obj in range(self.n_samples_):
+            decision_set = self.rel_matrix_y_[obj]
+            new_types = np.full(self.n_features_in_, RelationTypes.INDISCERNIBLE, dtype=RelationTypes)
+            new_slopes = np.ones(self.n_features_in_, dtype=float)
+
+            if self.with_reducts:
+                for attribute in ordered_attributes:
+                    temp_types = new_types
+
+                    # we do UNUSED separately because then the slopes don't matter
+                    temp_types[attribute] = RelationTypes.UNUSED
+                    new_granule = fo.lukasiewicz_t_norm(
+                        triangular_relation(X, X[obj], new_slopes, temp_types),
+                        self.positive_region_[obj]
+                    )
+                    if self.inclusion_measure_.inclusion(new_granule, decision_set) > self._get_inclusion_threshold(X[obj], y[obj]):
+                        new_types = temp_types
+                        continue  # go to the next attribute
+
+                    # if UNUSED is not enough, we check the other types
+                    found = False
+                    for temp_type in [RelationTypes.DOMINATED, RelationTypes.DOMINANT, RelationTypes.INDISCERNIBLE]:
+                        if found:
+                            break
+                        temp_types[attribute] = temp_type
+                        if self.optimise_slopes:
+                            temp_slopes = new_slopes
+                            for slope in self.slope_options_:
+                                if found:
+                                    break
+                                temp_slopes[attribute] = slope
+                                new_granule = fo.lukasiewicz_t_norm(
+                                    triangular_relation(X, X[obj], temp_slopes, temp_types),
+                                    self.positive_region_[obj]
+                                )
+                                if (self.inclusion_measure_.inclusion(new_granule, decision_set)
+                                        > self._get_inclusion_threshold(X[obj], y[obj])):
+                                    new_types = temp_types
+                                    new_slopes = temp_slopes
+                                    found = True
+                        else:  # we only need to check the default slope (i.e. 1)
+                            new_granule = fo.lukasiewicz_t_norm(
+                                triangular_relation(X, X[obj], new_slopes, temp_types),
+                                self.positive_region_[obj]
+                            )
+                            if (self.inclusion_measure_.inclusion(new_granule, decision_set)
+                                    > self._get_inclusion_threshold(X[obj], y[obj])):
+                                new_types = temp_types
+                                found = True
+
+            reducts.append(new_types)
+            slopes.append(new_slopes)
+        return np.array(reducts), np.array(slopes)
+
+    def _optimisation_procedure(
+            self,
+            full_dis_covering,
+            candidates = None,
+            uncovered = None,
+    ):
+        """
+        Rule selection step = solving of the optimisation problem
+        :param full_dis_covering: covering matrix (z_{u,v}) = d[j][i]
+        :param n_candidates: only used if we discard uncertain objects
+        :return: solution to the optimisation problem
+        """
+        if candidates is None:
+            candidates = range(self.n_samples_)
+
+        dis_model = gb.Model("discrete_rule_induction")
+        # print(full_dis_covering)
+        rules = []
+        for _ in candidates:
+            rules.append(dis_model.addVar(vtype=gb.GRB.BINARY, obj=1))
+        dis_model.modelSense = gb.GRB.MINIMIZE
+
+        for i in range(self.n_samples_):
+            if i in uncovered:
+                continue
+            exp = gb.quicksum([full_dis_covering[i][index] * rules[index] for index, _ in enumerate(candidates)])
+            dis_model.addConstr(exp >= 1)  # , name='Coverage requirement'
+
+        dis_model.setParam("OutputFlag", 0)
+        dis_model.optimize()
+
+        selected = []
+        for index, obj in enumerate(candidates):
+            if rules[index].x > 0.99:
+                selected.append(obj)
+
+        return np.array(selected)
+
+    def _relabel(self, X: np.ndarray, y: np.ndarray) -> (np.ndarray, np.ndarray):
+        """
+        Recalculates the labels of the objects in the training set X according to the result of the granular
+        approximation process. This function must run after self.positive_region_ has been calculated.
+        # todo add check for this final sentence
+
+        :param X: preprocessed dataset, but before reducts
+        :param y:
+        :return: (new labels, new positive region (approximation))
+        """
+        # start by separating out the decision classes?
+        separated_classes = [[] for _ in range(self.n_classes_)]  # contains obj( = index) separated by class
+        for obj in range(self.n_samples_):
+            separated_classes[y[obj]].append(obj)
+
+        new_y = []
+        new_gran_approx = []
+        nr_changes = 0
+
+        for obj in range(self.n_samples_):
+            best_label = y[obj]
+            best_membership = self.positive_region_[obj]  # first case -> use the solution of the optimisation problem
+            for label in range(self.n_classes_):
+                if label != y[obj]:  # second case: compare to the objects in class label
+                    temp = max(
+                        fo.lukasiewicz_t_norm(
+                            triangular_relation(X[separated_classes[label]], X[obj]),
+                            self.positive_region_[separated_classes[label]]
+                        )
+                    )
+                    if temp > best_membership + self.relabelling_threshold:
+                        best_membership = temp
+                        best_label = label
+            if best_label != y[obj]:
+                nr_changes += 1
+            new_y.append(best_label)
+            new_gran_approx.append(best_membership)
+
+        if self.print_changes:
+            print(f"{nr_changes} labels out of {self.n_samples_} were changed.")
+            # print(new_gran_approx)
+
+        return new_y, new_gran_approx
+
+    def fit(self, X: np.ndarray, y: np.ndarray, types: np.ndarray = None):
+        # initialise fit
+        X, y = check_X_y(X, y)
+        check_classification_targets(y)
+        self.classes_, y, counts = np.unique(y, return_inverse=True, return_counts=True)
+        self.priors_ = np.divide(counts, max(counts))  # scaled_priors
+        self.n_classes_ = len(self.classes_)
+        self.types_ = types
+        self.n_samples_, self.n_features_in_ = X.shape
+
+        self.approximation_ = LowerApproximation() if self.approximation is None else self.approximation
+        self.inclusion_measure_ = ImplicatorInclusion() if self.inclusion_measure is None else self.inclusion_measure
+        self.attribute_ordering_ = QuickReduct() if self.attribute_ordering is None else self.attribute_ordering
+        self.scaler_ = MinMaxScaler() if self.scaler is None else self.scaler
+        self.slope_options_ = [0.001, 0.01, 0.1, 0.5, 1] if self.slope_options is None else self.slope_options
+
+
+        X = self.scaler_.fit_transform(X)
+        # self.rel_matrix_x_ = fo.triangular_similarity(X, X)
+
+        # calculate positive region and perform reducts
+        self.positive_region_ = self.approximation_.get_approximation(X, y)
+        if self.apply_relabelling:
+            y, self.positive_region_ = self._relabel(X, y)
+        self.rel_matrix_y_ = fo.discernibility_matrix(y, y)
+        self.reducts_, self.slopes_ = self._get_reducts(X, y)
+
+        rule_candidates = range(self.n_samples_)
+        if self.discard_uncertain_objects:
+            rule_candidates = []
+            for i in range(self.n_samples_):
+                # print(self.positive_region_[i])
+                if self.positive_region_[i] >= self.certainty_threshold:
+                    rule_candidates.append(i)
+
+        if self.print_nr_of_rule_candidates:
+            print(f"{len(rule_candidates)} candidates out of {self.n_samples_} possible objects")
+
+        covering = np.zeros((len(rule_candidates), self.n_samples_))
+
+        for index, obj in enumerate(rule_candidates):
+            current_covering = fo.lukasiewicz_t_norm(
+                triangular_relation(
+                    X,
+                    X[obj],
+                    self.slopes_[obj],
+                    self.reducts_[obj]
+                ),
+                self.positive_region_[obj]
+            )
+            if len(current_covering.shape) > 1:
+                current_covering = current_covering.T
+            covering[index, :] = (1 * (current_covering > self.covering_threshold))
+
+        uncovered_objects = []
+        if np.any(np.sum(covering, axis=0) == 0):
+            uncovered_objects = np.flatnonzero(np.sum(covering, axis=0) == 0)
+            if self.print_nr_of_rule_candidates:
+                print(f"{np.count_nonzero(np.sum(covering, axis=0) == 0)} objects remain uncovered.")
+                print("These objects will be removed from the covering matrix and can be added "
+                      "as rules after the rule selection")
+
+        selected_indexes = self._optimisation_procedure(covering.T, rule_candidates, uncovered_objects)
+        self.rules_ = [Rule(
+            X[i],
+            self.reducts_[i],
+            self.slopes_[i],
+            self.positive_region_[i],
+            y[i]
+        ) for i in selected_indexes]
+        if self.add_uncovered_objects:
+            for i in uncovered_objects:
+                self.rules_.append(Rule(
+                    X[i],
+                    self.reducts_[i],
+                    self.slopes_[i],
+                    self.positive_region_[i],
+                    y[i]
+                ))
+
+        return self
+
+    def predict_proba(self, X: np.ndarray, normalized: bool = True) -> np.ndarray:
+        X, credibility_predictions = self.pre_predict(X)
+
+        # sum credibility for each class
+        cumulative_credibility = np.zeros((X.shape[0], self.n_classes_))
+        for i in range(self.n_classes_):
+            if len(credibility_predictions[i]) != 0:  # easy fix for 0 size array problem!
+                cumulative_credibility[:, i] = np.max(np.array(credibility_predictions[i]), 0)
+        if normalized:
+            cumulative_credibility = normalize(cumulative_credibility, norm='l1')
+
+        return cumulative_credibility
+
+    def pre_predict(self, X: np.ndarray) -> tuple[object, list]:
+        check_is_fitted(self)
+        # rescale X
+        X = check_array(X)
+        X_test = self.scaler_.transform(X)
+        # calculate credibility of each rule
+        credibility_predictions = []
+        for i in range(self.n_classes_):
+            credibility_predictions.append([])
+        for rule in self.rules_:
+            credibility_predictions[rule.decision].append(
+                fo.lukasiewicz_t_norm(
+                    triangular_relation(
+                        X_test,
+                        rule.antecedent,
+                        rule.slopes,
+                        rule.reducts
+                    ),
+                    rule.credibility
+                ).reshape((len(X_test)))
+            )
+        return X, credibility_predictions
+
+    def predict(self, X: np.ndarray) -> np.ndarray:
+        check_is_fitted(self)
+        return self.classes_[np.argmax(self.predict_proba(X, normalized=False), 1)]
+
+    def get_info(self) -> str:
+        return str(self)
+
+    def average_rule_length(self):
+        if not hasattr(self, "approximation_"):
+            return 0
+        return np.sum(np.array([rule.reducts for rule in self.rules_]) != RelationTypes.UNUSED) / len(self.rules_)
+
+    def __str__(self) -> str:
+        if hasattr(self, "approximation_"):
+            return f"@non-overlap-rules-base\n@approximation: {self.approximation_}\n@scaler: {self.scaler}\n@num_rules: {len(self.rules_)}\n@average-length: {self.average_rule_length()}"
+        else:
+            return f"@non-overlap-rules-base-NOT-YET-FITTED"
+
+    def get_rules_as_string(self) -> list[str]:
+        return [repr(rule) for rule in self.rules_]
+
+    def get_rules(self) -> np.ndarray:
+        return np.array(self.rules_)
+

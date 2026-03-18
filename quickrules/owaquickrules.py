@@ -8,22 +8,34 @@ class OWAQuickRules(QuickRules):
     """
     def __init__(
             self,
-            t_norm: TNorm,
             implicator: Implicator,
             relation_factory: RelationFactory,
             weight_function: Weights,
-            prune: bool = False,
-            combo: bool = True  # signifies the prediction component
+            relaxation: float = 0.0,
+            tolerance: float = 1e-9,
+            post_prune: bool = False,
+            rule_prune: bool = False,
+            combo: bool = True,
+            verbose: bool = False
     ):
-        super().__init__(t_norm, implicator, relation_factory, prune, combo)
+        super().__init__(
+            implicator=implicator,
+            relation_factory=relation_factory,
+            relaxation=relaxation,
+            tolerance=tolerance,
+            post_prune=post_prune,
+            rule_prune=rule_prune,
+            combo=combo,
+            verbose=verbose
+        )
         self.weight_function = weight_function
         self.weights: np.ndarray = Optional[None]
 
     def get_info(self) -> str:
         return "@owa-quickrules\n" + super().get_info()
 
-    def _init_fit(self, x: np.ndarray, y: np.ndarray):
-        super()._init_fit(x, y)
+    def _init_fit(self, x: np.ndarray, y: np.ndarray, t: np.ndarray):
+        super()._init_fit(x, y, t)
         self.weights = self.weight_function(self.X.shape[0])
 
     def _calculate_single_pos_membership(self,
