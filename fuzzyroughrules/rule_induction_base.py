@@ -19,7 +19,7 @@ import importlib
 
 importlib.reload(fo)
 
-@dataclass(repr=True, frozen=True)
+@dataclass(repr=True, frozen=False)
 class Rule:
     antecedent: np.ndarray
     reducts: np.ndarray
@@ -349,7 +349,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
 
         return cumulative_credibility
 
-    def pre_predict(self, X: np.ndarray) -> tuple[object, list]:
+    def pre_predict(self, X: np.ndarray) -> tuple[np.ndarray, list]:
         check_is_fitted(self)
         # rescale X
         X = check_array(X)
