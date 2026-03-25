@@ -41,6 +41,9 @@ class MulticlassMSECVXApproximation:
             n_jobs=self.n_jobs
         )
 
+    def __str__(self):
+        return "MulticlassMSECVXApproximation()"
+
 
 @dataclass
 class MulticlassMAECVXApproximation:
@@ -59,6 +62,9 @@ class MulticlassMAECVXApproximation:
             n_jobs=self.n_jobs
         )
 
+    def __str__(self):
+        return "MulticlassMAECVXApproximation()"
+
 
 @dataclass
 class MulticlassMSEGurobiApproximation:
@@ -75,6 +81,10 @@ class MulticlassMSEGurobiApproximation:
             nn_approx=self.nn_approx,
         )
 
+    def __str__(self):
+        return "MulticlassMSEGurobiApproximation()"
+
+
 
 @dataclass
 class OWALowerApproximation:
@@ -89,3 +99,7 @@ class OWALowerApproximation:
             fuzzy_set=rel_matrix_y,
             weights=self.weights
         )
+
+    def __str__(self):
+        return "OWALowerApproximation()"
+
