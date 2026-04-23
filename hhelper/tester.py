@@ -188,7 +188,8 @@ def calculate_score(data_folder: Path,
                     exclude: Optional[list[str]] = None,
                     include: Optional[list[str]] = None,
                     nr_of_folds: int = 10,
-                    verbose: bool = False
+                    verbose: bool = False,
+                    subfix: str = ""
                     ) -> dict[str, float]:
     """
     This method returns the average value of the metric on each data set in the data folder.
@@ -201,10 +202,13 @@ def calculate_score(data_folder: Path,
     :param include: data sets to include
     :param nr_of_folds: number of folds of the cross-validation
     :param verbose: should we print the name of the data set on which we are calculating the score?
+    :param subfix: subfix to add to the end of the file name, mostly used for incremental models
     :return: dictionary containing the average score on each data set
     """
     if exclude is None:
         exclude = ['abalone']
+    if subfix != "":
+        subfix = f"-{subfix}"
     scores = {}
     for dataset_dir in data_folder.iterdir():
         # skip .gitignore files
@@ -234,7 +238,7 @@ def calculate_score(data_folder: Path,
                     classes = list(np.load(str(fold_result_path / f"label_encoding_fold{fold + 1}.npy")))
                     y_test = np.array([classes.index(label) for label in y_test])
 
-                predictions = pd.read_csv(fold_result_path / f"fold{fold + 1}.dat",
+                predictions = pd.read_csv(fold_result_path / f"fold{fold + 1}{subfix}.dat",
                                           comment='@', header=None).values
                 try:
                     metrics.append(metric(y_test, predictions))
@@ -253,6 +257,7 @@ def count_all_rules(results_folder: Path,
                     exclude: Optional[list[str]] = None,
                     include: Optional[list[str]] = None,
                     nr_of_folds: int = 10,
+                    subfix: str = "",
                     verbose: bool = False) -> dict[str, float]:
     """
     Counts the rules generated for achieving the results in the results folder
@@ -261,10 +266,13 @@ def count_all_rules(results_folder: Path,
     :param include: data sets to include
     :param nr_of_folds: number of folds used in cross-validation
     :param verbose: should we print the name of the data set on which we are counting the rules?
+    :param subfix: subfix to add to the end of the file name, mostly used for incremental models
     :return: dictionary of the average number of rules for each data set
     """
     if exclude is None:
         exclude = ['abalone']
+    if subfix != "":
+        subfix = f"-{subfix}"
     amount_of_rules = {}
     for dataset_dir in results_folder.iterdir():
         if dataset_dir.name[0] == "." or skip(dataset_dir.name, include, exclude):
@@ -280,7 +288,7 @@ def count_all_rules(results_folder: Path,
         for fold in range(nr_of_folds):
             # look up the folder for the results on this fold of the dataset
             sum_of_rules += count_rules(
-                dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}.dat"
+                dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}{subfix}.dat"
             )
 
         # add scores to the dictionary
@@ -305,7 +313,8 @@ def count_all_attributes(results_folder: Path,
                          include: Optional[list[str]] = None,
                          metric=np.average,
                          counter: str = ',',
-                         nr_of_folds: int = 10,
+                         subfix: str = "",
+                        nr_of_folds: int = 10,
                          verbose: bool = False) -> dict[str, float]:
     """
     Counts the average metric(number of attributes) in the rules generated
@@ -319,10 +328,13 @@ def count_all_attributes(results_folder: Path,
     :param include: data sets to include
     :param nr_of_folds: number of folds used in cross-validation
     :param verbose: should we print the name of the data set on which we are counting the rules?
+    :param subfix: subfix to add to the end of the file name, mostly used for incremental models
     :return: dictionary of the average number of attributes in the rules for each data set
     """
     if exclude is None:
         exclude = ['abalone']
+    if subfix != "":
+        subfix = f"-{subfix}"
     amount_of_attributes = {}
     for dataset_dir in results_folder.iterdir():
         if dataset_dir.name[0] == "." or skip(dataset_dir.name, include, exclude):
@@ -338,7 +350,7 @@ def count_all_attributes(results_folder: Path,
         for fold in range(nr_of_folds):
             # look up the folder for the results on this fold of the dataset
             sum_of_attributes += metric(count_attributes(
-                dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}.dat",
+                dataset_result_path / f"fold{fold + 1}" / f"rules_fold{fold + 1}{subfix}.dat",
                 counter=counter
             ))
 
@@ -416,4 +428,202 @@ def new_count_all_attributes(results_folder: Path,
             print(amount_of_attributes[dataset_dir.name])
 
     return amount_of_attributes
+
+
+def incremental_tester(
+        model: RuleInductionModel,
+        datasets_folder: Path,
+        results_folder: Path,
+        get_rules: bool|str = "string",
+        print_info: bool = False,
+        exclude: Optional[list[str]] = None,
+        include: Optional[list[str]] = None,
+        verbose: bool = False,
+        nr_of_folds: int = 10,
+        encode_labels: bool = False,
+        use_data_types: bool = True,  # todo this can be handled better (* operator?)
+        save_probas: bool = False,
+        timing: bool = False,
+        training: bool = False,
+        increment: int = 2,
+) -> None:
+    """
+    This method runs a given incremental model on a collection of data sets and saves the predictions
+    in the given path.
+
+    There should always be at least 2 increments. 1 base, i.e., running FRRI on the smallest portion, and then
+    increment - 1 runs of increments on that rule model
+
+    :param model: model to test
+    :param datasets_folder: folder containing the data sets
+    :param results_folder: folder where the results should be saved
+    :param get_rules: should we save the rules, as string or as pickle?
+    :param exclude: list of data sets to exclude
+    :param include: list of data sets to include
+    :param verbose: should we print the name of the data set we are testing on?
+    :param nr_of_folds: number of folds for the cross-validation
+    :param encode_labels: should we encode the labels as ints and save the dict to a file?
+    :param save_probas: save probabilities instead of just the productions
+    :param timing: should we track the time each run takes?
+    :param training: true if we should calculate the training accuracy
+    :param increment: how steps of incremental training should we take? f
+    :return: Nothing
+    """
+    for dataset_dir in datasets_folder.iterdir():
+        # skip .gitignore files
+        if dataset_dir.name[0] == ".":
+            continue
+
+        # get short name
+        short_name = dataset_dir.name[:search(r'\d', dataset_dir.name).start()][:-1]
+
+        # skip files if we're using excluded or must_include
+        if skip(short_name, include, exclude):
+            continue
+
+        if verbose:
+            print(short_name)
+
+        # create the folder for the results on this dataset
+        dataset_result_path = results_folder / short_name
+        if not os.path.exists(dataset_result_path):
+            os.makedirs(dataset_result_path)
+
+        for fold in range(nr_of_folds):
+            # PRELIMINARIES
+
+            # create the folder for the results on this fold of the dataset
+            fold_result_path = dataset_result_path / f"fold{fold + 1}"
+            if not os.path.exists(fold_result_path):
+                os.makedirs(fold_result_path)
+
+            # # skip if we already have results for these parameters
+            # if (fold_result_path / f"fold{fold + 1}.dat").is_file():
+            #     continue
+
+            # get the full train and test sets
+            x_train_full, y_train_full, t_train_full = get_dataset(dataset_dir, f"{fold + 1}tra", get_datatypes=True)
+            x_test, y_test = get_dataset(dataset_dir, f"{fold + 1}tst", get_datatypes=False)
+            part_size = int(len(x_train_full) / increment)
+
+            if encode_labels:
+                # encode the labels to ints
+                classes = list(np.unique(np.append(y_train_full, y_test)))
+                y_train_full = np.array([classes.index(label) for label in y_train_full])
+
+                # save the encoding
+                with open(fold_result_path / f"label_encoding_fold{fold + 1}.npy", 'wb') as f:
+                    np.save(f, classes)
+
+            # FIRST TRAINING ON THE BASE PART
+
+            lines = []
+            predictions: Optional[np.ndarray] = None
+
+            try:
+                # fit to the training set
+                if use_data_types:
+                    if timing:
+                        start = timer()
+                    model.fit(x_train_full[:part_size], y_train_full[:part_size], t_train_full[:part_size])
+                    if timing:
+                        end = timer()
+                else:
+                    if timing:
+                        start = timer()
+                    model.fit(x_train_full[:part_size], y_train_full[:part_size], t_train_full[:part_size])
+                    if timing:
+                        end = timer()
+                if print_info:
+                    lines.append(model.get_info())
+                if timing:
+                    lines.append(f"@execution_time: {end - start}s")
+            except Exception as err:
+                lines.extend([f"Error while training on fold {fold + 1}, base.", str(err)])
+                if verbose:
+                    print(lines)
+            else:
+                try:
+                    # query on the test set
+                    if save_probas:
+                        predictions = model.predict_proba(x_test)
+                    else:
+                        predictions = model.predict(x_test)
+                except Exception as err:
+                    lines.extend([f"Error while predicting on fold {fold + 1}, base.", str(err)])
+                    if verbose:
+                        print(lines)
+                finally:
+                    # save the rules
+                    if get_rules == "pickle":
+                        with open(fold_result_path / f"rules_fold{fold + 1}-base.pkl", 'wb') as f:
+                            pickle.dump(model.get_rules(), f)
+                    elif get_rules or get_rules == "string":
+                        with open(fold_result_path / f"rules_fold{fold + 1}-base.dat", 'w') as f:
+                            for item in model.get_rules_as_string():
+                                f.write(f"{item}\n")
+            finally:
+                # save the predictions
+                with open(fold_result_path / f"fold{fold + 1}-base.dat", 'w') as f:
+                    for item in lines:
+                        f.write(f"{item}\n")
+                    if predictions is not None:  # this was one tab further
+                        if save_probas:
+                            np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%.7f')
+                        else:
+                            np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%i')
+
+            # now iteratively increase the amount of objects that are ingested incrementally
+
+            for i in range(1, increment):
+                # TRAINING AND PREDICTION
+                lines = []
+                predictions: Optional[np.ndarray] = None
+                try:
+                    # fit to the training set
+                    if timing:
+                        start = timer()
+                    for x, y in zip(x_train_full[i * part_size:(i + 1) * part_size], y_train_full[i * part_size:(i + 1) * part_size]):
+                        model.increment(x, y)
+                    if timing:
+                        end = timer()
+                    print(f"Training on fold {fold + 1}, increment {i}.")
+                    if print_info:
+                        lines.append(model.get_info())
+                    if timing:
+                        lines.append(f"@execution_time: {end - start}s")
+                except Exception as err:
+                    lines.extend([f"Error while training on fold {fold + 1}, increment {i}.", str(err)])
+                    if verbose:
+                        print(lines)
+                else:
+                    try:
+                        # query on the test set
+                        if save_probas:
+                            predictions = model.predict_proba(x_test)
+                        else:
+                            predictions = model.predict(x_test)
+                    except Exception as err:
+                        lines.extend([f"Error while predicting on fold {fold + 1}, increment{i}.", str(err)])
+                        if verbose:
+                            print(lines)
+                    finally:
+                        # save the rules
+                        if get_rules == "pickle":
+                            with open(fold_result_path / f"rules_fold{fold + 1}-increment{i}.pkl", 'wb') as f:
+                                pickle.dump(model.get_rules(), f)
+                        elif get_rules or get_rules == "string":
+                            with open(fold_result_path / f"rules_fold{fold + 1}-increment{i}.dat", 'w') as f:
+                                for item in model.get_rules_as_string():
+                                    f.write(f"{item}\n")
+                finally:
+                    # save the predictions
+                    with open(fold_result_path / f"fold{fold + 1}-increment{i}.dat", 'w') as f:
+                        for item in lines:
+                            f.write(f"{item}\n")
+                        if predictions is not None:  # this was one tab further
+                            if save_probas:
+                                np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%.7f')
+                            else:
+                                np.savetxt(fname=f, X=predictions, delimiter=",", fmt='%i')
 
