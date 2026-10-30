@@ -94,7 +94,24 @@ def triangular_relation(
     return np.min(np.concatenate(comparisons, -1), -1)
 
 
+# at most this many elements in the intermediate (rows of x, rows of y, attributes) array, i.e. 32 MB of floats
+BLOCK_ELEMENTS = 2 ** 22
+
+
 def triangular_dominance(x, y, slope=1., rel_type=RelationTypes.INDISCERNIBLE):
+    """
+    Computed in blocks of rows of x, so that memory does not grow with len(x) * len(y) * n_attributes. The values are
+    the same as computing everything at once.
+    """
+    rows = max(1, BLOCK_ELEMENTS // max(1, y.shape[0] * x.shape[-1]))
+    if x.shape[0] <= rows:
+        return _triangular_dominance_block(x, y, slope, rel_type)
+    return np.concatenate([
+        _triangular_dominance_block(x[start:start + rows], y, slope, rel_type) for start in range(0, x.shape[0], rows)
+    ])
+
+
+def _triangular_dominance_block(x, y, slope=1., rel_type=RelationTypes.INDISCERNIBLE):
     ext_dim_x = y.shape[0]
     ext_dim_y = x.shape[0]
     x_ext = np.repeat(x[:, np.newaxis, :], ext_dim_x, axis=1)

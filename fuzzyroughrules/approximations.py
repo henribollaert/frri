@@ -1,4 +1,5 @@
 import fuzzyroughrules.fuzzy_operators as fo
+import fuzzyroughrules.operators as operators
 import numpy as np
 from typing import Optional
 from dataclasses import dataclass
@@ -12,13 +13,25 @@ class LowerApproximation:
         """
         Returns a 1d array where location x gives the membership of x to the
         lower approximation of its class
+        The relation is computed in blocks of rows, so that memory does not grow with n_objects ** 2 * n_attributes.
+        The values are the same as computing everything at once.
         :param X: Information table
         :param y: Labels
         :return:
         """
-        rel_matrix_x = fo.triangular_similarity(X, X)
-        rel_matrix_y = fo.discernibility_matrix(y, y)
-        return fo.get_ind_low_apr(rel_matrix_x, rel_matrix_y)
+        rows = max(1, operators.BLOCK_ELEMENTS // max(1, X.shape[0] * X.shape[1]))
+        if X.shape[0] <= rows:
+            rel_matrix_x = fo.triangular_similarity(X, X)
+            rel_matrix_y = fo.discernibility_matrix(y, y)
+            return fo.get_ind_low_apr(rel_matrix_x, rel_matrix_y)
+        # get_ind_low_apr for a block of rows, without its warning about a matrix that is not square
+        return np.concatenate([
+            np.min(fo.lukasiewicz_implicator(
+                fo.triangular_similarity(X[start:start + rows], X),
+                fo.discernibility_matrix(y[start:start + rows], y)
+            ), 1)
+            for start in range(0, X.shape[0], rows)
+        ])
 
     def __str__(self):
         return "LowerApproximation()"
