@@ -28,6 +28,33 @@ class Rule:
     decision: int
 
 
+def rule_coverage(rules: list[Rule], X: np.ndarray, covering_threshold: float = 1e-6) -> np.ndarray:
+    """
+    Calculates which objects are covered by which rules, using the credibility stored in the rules.
+    :param rules: the rules to evaluate
+    :param X: scaled objects
+    :param covering_threshold: minimum membership of an object to a rule to be covered by it
+    :return: binary matrix of shape (n_rules, n_objects)
+    """
+    covering = np.zeros((len(rules), X.shape[0]))
+
+    for index, rule in enumerate(rules):
+        current_covering = fo.lukasiewicz_t_norm(
+            triangular_relation(
+                X,
+                rule.antecedent,
+                rule.slopes,
+                rule.reducts
+            ),
+            rule.credibility
+        )
+        if len(current_covering.shape) > 1:
+            current_covering = current_covering.T
+        covering[index, :] = (1 * (current_covering > covering_threshold))
+
+    return covering
+
+
 class Approximation(Protocol):
     def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         ...
@@ -292,21 +319,11 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         if self.print_nr_of_rule_candidates:
             print(f"{len(rule_candidates)} candidates out of {self.n_samples_} possible objects")
 
-        covering = np.zeros((len(rule_candidates), self.n_samples_))
-
-        for index, obj in enumerate(rule_candidates):
-            current_covering = fo.lukasiewicz_t_norm(
-                triangular_relation(
-                    X,
-                    X[obj],
-                    self.slopes_[obj],
-                    self.reducts_[obj]
-                ),
-                self.positive_region_[obj]
-            )
-            if len(current_covering.shape) > 1:
-                current_covering = current_covering.T
-            covering[index, :] = (1 * (current_covering > self.covering_threshold))
+        covering = rule_coverage(
+            [Rule(X[i], self.reducts_[i], self.slopes_[i], self.positive_region_[i], y[i]) for i in rule_candidates],
+            X,
+            self.covering_threshold
+        )
 
         uncovered_objects = []
         if np.any(np.sum(covering, axis=0) == 0):
