@@ -16,6 +16,7 @@ from fuzzyroughrules.federated.partition import (
     FixedRangeScaler, global_classes, global_min_max, horizontal_split
 )
 from fuzzyroughrules.federated.payload import RulePayload
+from fuzzyroughrules.federated.rounds import REPAIR_TOLERANCE, coverage_rounds, repair_rules
 from fuzzyroughrules.rule_induction_base import RuleGenerator, evaluate_rules
 
 DATASETS = {"iris": load_iris, "wine": load_wine}
@@ -134,3 +135,82 @@ def test_rule_relation_minimum_on_own_data_agrees_with_stored_credibility(name):
     rules = client.fit_local(scaler, global_classes([client.labels()]))
     stored = np.array([rule.confidence for rule in rules])
     assert client.local_minima(rules) == pytest.approx(stored, abs=1e-6)
+
+
+def federated_confidence(clients, client_rules):
+    return global_confidence([client.local_minima(union_local(client_rules)) for client in clients])
+
+
+def test_repaired_rules_get_the_central_confidence(federation):
+    clients, client_rules, _, X_union, y_union = federation
+    repaired, confidence, log = repair_rules(clients, client_rules, federated_confidence(clients, client_rules))
+    assert log, "this federation must need repair, or the test checks nothing"
+    central = [central_confidence(rule, X_union, y_union) for rule in union_local(repaired)]
+    assert confidence == pytest.approx(central, abs=1e-12)
+
+
+def test_repair_adds_attributes_of_the_own_object_and_stops_when_recovered(federation):
+    clients, client_rules, _, X_union, y_union = federation
+    repaired, _, log = repair_rules(clients, client_rules, federated_confidence(clients, client_rules))
+    n_features = X_union.shape[1]
+    for client, original, final in zip(clients, client_rules, repaired):
+        for index, (before, after) in enumerate(zip(original, final)):
+            target = before.confidence - REPAIR_TOLERANCE
+            added = set(after.attributes) - set(before.attributes)
+            if central_confidence(before, X_union, y_union) >= target:
+                assert after == before
+                continue
+            assert added
+            kept = {a: (v, t, s) for a, v, t, s in zip(after.attributes, after.values, after.relation_types, after.slopes)}
+            for a, v, t, s in zip(before.attributes, before.values, before.relation_types, before.slopes):
+                assert kept[a] == (v, t, s)
+            own_object = client.model.rules_[index].antecedent
+            for a in added:
+                assert kept[a] == (own_object[a], "INDISCERNIBLE", 1.)
+            recovered = central_confidence(after, X_union, y_union) >= target
+            assert recovered or len(after.attributes) == n_features
+            if recovered:
+                # one round less leaves the rule below its local confidence
+                shorter, _, _ = repair_rules(
+                    clients, client_rules, federated_confidence(clients, client_rules), max_rounds=len(added) - 1
+                )
+                assert central_confidence(shorter[clients.index(client)][index], X_union, y_union) < target
+
+
+def central_uncovered(rules, X, y, own_X):
+    """Objects of own_X that none of the rules covers, with the confidence calculated on the union X, y."""
+    confidence = [central_confidence(rule, X, y) for rule in rules]
+    return [
+        i for i, obj in enumerate(own_X)
+        if not any(max(relation(rule, obj) + c - 1, 0) > COVERING_THRESHOLD for rule, c in zip(rules, confidence))
+    ]
+
+
+def test_new_candidates_are_the_rules_of_the_centrally_uncovered_objects(federation):
+    clients, client_rules, classes, X_union, y_union = federation
+    rated = union_global(client_rules, federated_confidence(clients, client_rules))
+    selected, _ = set_cover(rated, np.hstack([client.coverage_columns(rated, seed=i) for i, client in enumerate(clients)]))
+    for client, own in zip(clients, client_rules):
+        expected = set()
+        for i in central_uncovered(selected, X_union, y_union, client.X_scaled):
+            used = [a for a in range(X_union.shape[1]) if client.model.reducts_[i][a].name != "UNUSED"]
+            expected.add((tuple(used), tuple(client.X_scaled[i][used]), client.y_train[i]))
+        expected -= {(rule.attributes, rule.values, rule.label) for rule in own}
+        new = client.uncovered_rules(selected)
+        assert {(rule.attributes, rule.values, rule.label) for rule in new} == expected
+        # a rule is only sent once
+        assert client.uncovered_rules(selected) == []
+
+
+def test_coverage_rounds_cover_what_the_central_candidates_cover(federation):
+    clients, client_rules, _, X_union, y_union = federation
+    selected, n_uncovered, candidates, log = coverage_rounds(
+        clients, client_rules, federated_confidence(clients, client_rules), seed=0
+    )
+    assert [rule.confidence for rule in candidates] == pytest.approx(
+        [central_confidence(rule, X_union, y_union) for rule in candidates], abs=1e-12
+    )
+    coverable = np.any(central_coverage(candidates, X_union, y_union), axis=0)
+    assert n_uncovered == np.sum(~coverable)
+    assert np.array_equal(np.any(central_coverage(selected, X_union, y_union), axis=0), coverable)
+    assert log[0]["n_uncovered"] >= log[-1]["n_uncovered"]
