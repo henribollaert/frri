@@ -76,11 +76,22 @@ def evaluate_rules(
     :param covering_threshold: minimum membership of an object to a rule to be covered by it
     :return: (minimum over the objects of I(R_r(x_r, u), [d_r = d(u)]) for each rule, coverage of the rules)
     """
+    return rule_minima(rules, X, y), rule_coverage(rules, X, covering_threshold)
+
+
+def rule_minima(rules: list[Rule], X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    """
+    The first part of evaluate_rules, without the coverage.
+    :param rules: the rules to evaluate
+    :param X: scaled objects
+    :param y: labels, with the same encoding as the decisions of the rules
+    :return: minimum over the objects of I(R_r(x_r, u), [d_r = d(u)]) for each rule
+    """
     minima = np.zeros(len(rules))
     for index, rule in enumerate(rules):
         relation = triangular_relation(X, rule.antecedent, rule.slopes, rule.reducts).reshape(len(X))
         minima[index] = np.min(fo.lukasiewicz_implicator(relation, 1 * (y == rule.decision)))
-    return minima, rule_coverage(rules, X, covering_threshold)
+    return minima
 
 
 SOLVERS = ("auto", "gurobi", "scipy")
