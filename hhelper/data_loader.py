@@ -51,7 +51,7 @@ def get_dataset(
     :return: values of conditional features, values of decision attribute,
     possibly the datatypes of the conditional features
     """
-    set_list = [_ for _ in folder_path.iterdir() if keyword in _.name]
+    set_list = [d for d in folder_path.iterdir() if keyword in d.name]
     assert len(set_list) == 1, f'{len(set_list)} files with {keyword} in their name.'
 
     dataset = pd.read_csv(set_list[0], header=None, comment='@')

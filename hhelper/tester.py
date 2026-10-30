@@ -51,6 +51,8 @@ def test_save(
         include: Optional[list[str]] = None,
         verbose: bool = False,
         nr_of_folds: int = 10,
+        # fold_prefix: str = "fold",
+        needs_short_name: bool = True,
         encode_labels: bool = False,
         use_data_types: bool = True,  # todo this can be handled better (* operator?)
         save_probas: bool = False,
@@ -80,8 +82,14 @@ def test_save(
         if dataset_dir.name[0] == ".":
             continue
 
+        if verbose:
+            print(f"Testing on {dataset_dir.name}.")
+
+        if needs_short_name:
         # get short name
-        short_name = dataset_dir.name[:search(r'\d', dataset_dir.name).start()][:-1]
+            short_name = dataset_dir.name[:search(r'\d', dataset_dir.name).start()][:-1]
+        else:
+            short_name = dataset_dir.name
 
         # skip files if we're using excluded or must_include
         if skip(short_name, include, exclude):
@@ -189,10 +197,12 @@ def calculate_score(data_folder: Path,
                     include: Optional[list[str]] = None,
                     nr_of_folds: int = 10,
                     verbose: bool = False,
+                    needs_short_name: bool = True,
                     subfix: str = ""
                     ) -> dict[str, float]:
     """
     This method returns the average value of the metric on each data set in the data folder.
+    :param needs_short_name: which naming convention should we use?
     :param label_encoding: do we need to look up the label encoding?
     :param data_folder: folder containing the data sets
     :param results_folder: folder containing the results
@@ -215,7 +225,12 @@ def calculate_score(data_folder: Path,
         if dataset_dir.name[0] == ".":
             continue
         # very dirty, search depends on the fact that the names don't contain underscores
-        short_name = dataset_dir.name[:search(r'\d', dataset_dir.name).start()][:-1]
+        if needs_short_name:
+        # get short name
+            short_name = dataset_dir.name[:search(r'\d', dataset_dir.name).start()][:-1]
+        else:
+            short_name = dataset_dir.name
+
         if skip(short_name, include, exclude):
             continue
 
@@ -233,7 +248,6 @@ def calculate_score(data_folder: Path,
             fold_result_path = dataset_result_path / f"fold{fold + 1}"
             if fold_result_path.exists():
                 _, y_test = get_dataset(dataset_dir, f"{fold + 1}tst")
-
                 if label_encoding:
                     classes = list(np.load(str(fold_result_path / f"label_encoding_fold{fold + 1}.npy")))
                     y_test = np.array([classes.index(label) for label in y_test])
@@ -246,7 +260,6 @@ def calculate_score(data_folder: Path,
                     print(f"Unsuccessful for fold{fold + 1} on {short_name}.")
                 else:
                     successful_folds += 1
-
         # add scores to the dictionary
         scores[short_name] = aggregation_function(metrics) if successful_folds > 0 else np.NaN
 
