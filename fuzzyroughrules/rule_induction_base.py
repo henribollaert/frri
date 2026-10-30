@@ -105,10 +105,14 @@ def _select_with_gurobi(coverage: np.ndarray, weights: np.ndarray, uncovered, ti
         rules.append(dis_model.addVar(vtype=gb.GRB.BINARY, obj=weights[index]))
     dis_model.modelSense = gb.GRB.MINIMIZE
 
+    # only the rules that cover an object enter its constraint: the zero terms do not change the model, and leaving
+    # them out makes building it much faster
+    skipped = set(int(i) for i in np.asarray(uncovered, dtype=int))
+    columns = np.asarray(coverage).T
     for i in range(n_objects):
-        if i in uncovered:
+        if i in skipped:
             continue
-        exp = gb.quicksum([coverage[index][i] * rules[index] for index in range(n_rules)])
+        exp = gb.quicksum([columns[i][index] * rules[index] for index in np.flatnonzero(columns[i])])
         dis_model.addConstr(exp >= 1)  # , name='Coverage requirement'
 
     dis_model.setParam("OutputFlag", 0)
