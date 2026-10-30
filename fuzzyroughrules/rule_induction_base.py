@@ -55,6 +55,28 @@ def rule_coverage(rules: list[Rule], X: np.ndarray, covering_threshold: float = 
     return covering
 
 
+def evaluate_rules(
+        rules: list[Rule],
+        X: np.ndarray,
+        y: np.ndarray,
+        covering_threshold: float = 1e-6
+) -> tuple[np.ndarray, np.ndarray]:
+    """
+    Evaluates the given rules on the given data. The relation only uses the attributes of the rule, so this can differ
+    from the credibility given by fit, which is calculated with all attributes.
+    :param rules: the rules to evaluate
+    :param X: scaled objects
+    :param y: labels, with the same encoding as the decisions of the rules
+    :param covering_threshold: minimum membership of an object to a rule to be covered by it
+    :return: (minimum over the objects of I(R_r(x_r, u), [d_r = d(u)]) for each rule, coverage of the rules)
+    """
+    minima = np.zeros(len(rules))
+    for index, rule in enumerate(rules):
+        relation = np.squeeze(triangular_relation(X, rule.antecedent, rule.slopes, rule.reducts), axis=1)
+        minima[index] = np.min(fo.lukasiewicz_implicator(relation, 1 * (y == rule.decision)))
+    return minima, rule_coverage(rules, X, covering_threshold)
+
+
 class Approximation(Protocol):
     def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         ...
