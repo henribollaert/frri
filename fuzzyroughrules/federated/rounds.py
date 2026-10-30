@@ -103,7 +103,7 @@ def repair_rules(
 def confidence_weighted_set_cover(rules: list[RulePayload]) -> np.ndarray:
     """
     Objective that prefers confident rules: the cost of a rule is 2 - its confidence, so between 1 and 2. A rule with
-    confidence 1 costs as much as half a rule with confidence 0 more than it.
+    confidence 0 costs as much as two rules with confidence 1, so the number of rules still matters most.
     """
     return 2 - np.array([rule.confidence for rule in rules])
 

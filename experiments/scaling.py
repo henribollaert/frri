@@ -35,7 +35,8 @@ def peak_rss_mb() -> float:
 
 def federated(X: np.ndarray, y: np.ndarray, n_clients: int, time_limit: float) -> dict:
     split = horizontal_split(X, y, n_clients, seed=0)
-    clients = [FederatedClient(c.X_train, c.y_train) for c in split.clients]
+    # the local FRRI of a client also solves a set cover, which needs the same time limit
+    clients = [FederatedClient(c.X_train, c.y_train, solver_time_limit=time_limit) for c in split.clients]
     record = RoundRecorder()
     ranges = record("range", clients, lambda _, client: (client.min_max(), client.labels()))
     global_range = global_min_max([r for r, _ in ranges])

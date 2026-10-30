@@ -151,13 +151,16 @@ def run(
     :param coverage_max_rounds: maximum number of coverage rounds after the first set cover
     :param trace_memory: measure the peak memory of every round, which makes the durations longer
     :param solver: solver of every set cover and of centralised FRRI
-    :param time_limit: time limit of every set cover
+    :param time_limit: time limit of every set cover, also those of the local fits and of centralised FRRI
     :return: one row per model, one row per local model, one row per round, information about the run, the recall of
     every class for every model
     """
     run_start = perf_counter()
     split = horizontal_split(X, y, n_clients, seed, dirichlet_alpha=dirichlet_alpha)
-    clients = [FederatedClient(client.X_train, client.y_train, solver=solver) for client in split.clients]
+    clients = [
+        FederatedClient(client.X_train, client.y_train, solver=solver, solver_time_limit=time_limit)
+        for client in split.clients
+    ]
     record = RoundRecorder(trace_memory)
     try:
         # round 1: shared scale and classes, local induction
