@@ -72,7 +72,7 @@ def evaluate_rules(
     """
     minima = np.zeros(len(rules))
     for index, rule in enumerate(rules):
-        relation = np.squeeze(triangular_relation(X, rule.antecedent, rule.slopes, rule.reducts), axis=1)
+        relation = triangular_relation(X, rule.antecedent, rule.slopes, rule.reducts).reshape(len(X))
         minima[index] = np.min(fo.lukasiewicz_implicator(relation, 1 * (y == rule.decision)))
     return minima, rule_coverage(rules, X, covering_threshold)
 
