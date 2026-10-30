@@ -96,3 +96,15 @@ def test_random_weighted_problems_have_the_same_optimum():
         weights = rng.random(30) + 0.1
         values = [weights[select_rules_from_coverage(coverage, weights, uncovered, s)].sum() for s in ("gurobi", "scipy")]
         assert values[0] == pytest.approx(values[1], rel=1e-6)
+
+
+@pytest.mark.parametrize("solver", ["scipy", pytest.param("gurobi", marks=needs_gurobi)])
+def test_time_limit_gives_a_cover_and_a_warning(solver):
+    # random set cover problems are hard, so this one is not solved to optimality in 0.2 seconds
+    rng = np.random.default_rng(0)
+    coverage = (rng.random((400, 400)) < 0.02).astype(float)
+    uncovered = np.flatnonzero(coverage.sum(axis=0) == 0)
+    with pytest.warns(UserWarning, match="time limit"):
+        selected = select_rules_from_coverage(coverage, uncovered=uncovered, solver=solver, time_limit=0.2)
+    required = np.setdiff1d(np.arange(400), uncovered)
+    assert np.all(coverage[selected][:, required].sum(axis=0) >= 1)

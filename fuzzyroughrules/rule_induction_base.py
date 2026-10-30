@@ -86,7 +86,7 @@ def evaluate_rules(
 SOLVERS = ("auto", "gurobi", "scipy")
 
 
-def _select_with_gurobi(coverage: np.ndarray, weights: np.ndarray, uncovered) -> np.ndarray:
+def _select_with_gurobi(coverage: np.ndarray, weights: np.ndarray, uncovered, time_limit: float = None) -> np.ndarray:
     n_rules, n_objects = coverage.shape
     dis_model = gb.Model("discrete_rule_induction")
     rules = []
@@ -101,20 +101,27 @@ def _select_with_gurobi(coverage: np.ndarray, weights: np.ndarray, uncovered) ->
         dis_model.addConstr(exp >= 1)  # , name='Coverage requirement'
 
     dis_model.setParam("OutputFlag", 0)
+    if time_limit is not None:
+        dis_model.setParam("TimeLimit", time_limit)
     dis_model.optimize()
+    if dis_model.status == gb.GRB.TIME_LIMIT:
+        warnings.warn("Gurobi reached the time limit: the selected rules are not proven to be optimal.")
 
     return np.array([index for index in range(n_rules) if rules[index].x > 0.99], dtype=int)
 
 
-def _select_with_scipy(coverage: np.ndarray, weights: np.ndarray, uncovered) -> np.ndarray:
+def _select_with_scipy(coverage: np.ndarray, weights: np.ndarray, uncovered, time_limit: float = None) -> np.ndarray:
     n_rules, n_objects = coverage.shape
     required = np.setdiff1d(np.arange(n_objects), np.asarray(uncovered, dtype=int))
     constraints = None
     if required.size > 0:
         constraints = LinearConstraint(csr_matrix(coverage[:, required].T), lb=1, ub=np.inf)
+    options = {} if time_limit is None else {"time_limit": time_limit}
     result = milp(np.asarray(weights, dtype=float), constraints=constraints, integrality=np.ones(n_rules),
-                  bounds=Bounds(0, 1))
-    if not result.success:
+                  bounds=Bounds(0, 1), options=options)
+    if result.status == 1 and result.x is not None:
+        warnings.warn("scipy.optimize.milp reached the time limit: the selected rules are not proven to be optimal.")
+    elif not result.success:
         raise RuntimeError(f"scipy.optimize.milp could not solve the rule selection: {result.message}")
     return np.flatnonzero(result.x > 0.5)
 
@@ -123,7 +130,8 @@ def select_rules_from_coverage(
         coverage: np.ndarray,
         weights: np.ndarray = None,
         uncovered=(),
-        solver: str = "auto"
+        solver: str = "auto",
+        time_limit: float = None
 ) -> np.ndarray:
     """
     Rule selection step = solving of the optimisation problem
@@ -133,6 +141,8 @@ def select_rules_from_coverage(
     :param solver: "gurobi", "scipy" (scipy.optimize.milp, i.e. HiGHS) or "auto". Auto uses Gurobi, and falls back on
     scipy with a warning if gurobipy is not installed or raises an error, e.g. for an expired or size-limited licence.
     Both solve the problem to optimality, but tied optima can be resolved differently.
+    :param time_limit: seconds that the solver may use, None for no limit. When the limit is reached, the best
+    selection found so far is returned with a warning.
     :return: indices of the selected rules
     """
     if solver not in SOLVERS:
@@ -142,17 +152,17 @@ def select_rules_from_coverage(
         weights = np.ones(n_rules)
 
     if solver == "scipy":
-        return _select_with_scipy(coverage, weights, uncovered)
+        return _select_with_scipy(coverage, weights, uncovered, time_limit)
     if solver == "gurobi":
         if gb is None:
             raise ImportError("The gurobi solver needs gurobipy.")
-        return _select_with_gurobi(coverage, weights, uncovered)
+        return _select_with_gurobi(coverage, weights, uncovered, time_limit)
     if gb is not None:
         try:
-            return _select_with_gurobi(coverage, weights, uncovered)
+            return _select_with_gurobi(coverage, weights, uncovered, time_limit)
         except gb.GurobiError as error:
             warnings.warn(f"Gurobi can not be used ({error}), the rule selection uses scipy.optimize.milp instead.")
-    return _select_with_scipy(coverage, weights, uncovered)
+    return _select_with_scipy(coverage, weights, uncovered, time_limit)
 
 
 class Approximation(Protocol):
@@ -193,6 +203,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         inclusion_measure (InclusionMeasure): The inclusion measure to use. (default = ImplicatorInclusion())
         attribute_ordering (FeatureOrdering): The attribute ordering to use during the reduction step. (default = QuickReduct())
         solver (str): Solver of the rule selection: "auto", "gurobi" or "scipy", see select_rules_from_coverage. (default = "auto")
+        solver_time_limit (float): Seconds that the solver may use for the rule selection, None for no limit. (default = None)
         scaler = None
     """
     with_reducts: bool = True
@@ -213,6 +224,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     inclusion_measure: InclusionMeasure = None
     attribute_ordering: FeatureOrdering = None
     solver: str = "auto"
+    solver_time_limit: float = None
     matching_tnorm = None
     covering_tnorm = None
     scaler = None
@@ -316,7 +328,8 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         if candidates is None:
             candidates = range(self.n_samples_)
 
-        selected = select_rules_from_coverage(full_dis_covering.T, uncovered=uncovered, solver=self.solver)
+        selected = select_rules_from_coverage(full_dis_covering.T, uncovered=uncovered, solver=self.solver,
+                                              time_limit=self.solver_time_limit)
         return np.array([candidates[index] for index in selected])
 
     def _relabel(self, X: np.ndarray, y: np.ndarray) -> (np.ndarray, np.ndarray):
