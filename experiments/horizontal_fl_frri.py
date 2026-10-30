@@ -22,6 +22,7 @@ import numpy as np
 import pandas as pd
 from sklearn.metrics import balanced_accuracy_score
 
+from experiments.datasets import DATASETS
 from fuzzyroughrules.federated.aggregate import (
     build_global_model, global_confidence, set_cover, top_k_per_client, union_global, union_local
 )
@@ -32,7 +33,11 @@ from fuzzyroughrules.federated.partition import (
 )
 from fuzzyroughrules.rule_induction_base import RuleGenerator
 
-LOADERS = {"keel": load_keel_dataset}
+LOADERS = {
+    "keel": load_keel_dataset,
+    # --data-dir is the name of a dataset in experiments/datasets.py, e.g. --loader builtin --data-dir wine
+    "builtin": lambda path: DATASETS[Path(path).name](),
+}
 TOP_K = (0.5, 0.7)
 
 
