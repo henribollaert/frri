@@ -46,9 +46,10 @@ def central_confidence(rule: RulePayload, X: np.ndarray, y: np.ndarray) -> float
     return min(min(1 - relation(rule, obj) + (rule.label == label), 1) for obj, label in zip(X, y))
 
 
-def central_coverage(rules: list[RulePayload], X: np.ndarray) -> np.ndarray:
+def central_coverage(rules: list[RulePayload], X: np.ndarray, y: np.ndarray) -> np.ndarray:
+    # the confidence stored in the rules is not used, as that is part of what is being tested
     return np.array([
-        [max(relation(rule, obj) + rule.confidence - 1, 0) > COVERING_THRESHOLD for obj in X]
+        [max(relation(rule, obj) + central_confidence(rule, X, y) - 1, 0) > COVERING_THRESHOLD for obj in X]
         for rule in rules
     ], dtype=float)
 
@@ -92,13 +93,13 @@ def test_global_confidence_is_exactly_the_core_evaluation_on_the_union(federatio
 
 
 def test_pooled_coverage_equals_central_coverage_up_to_column_order(federation):
-    clients, client_rules, _, X_union, _ = federation
+    clients, client_rules, _, X_union, y_union = federation
     rules = union_local(client_rules)
     confidence = global_confidence([client.local_minima(rules) for client in clients])
     rated = union_global(client_rules, confidence)
     pooled = np.hstack([client.coverage_columns(rated, seed=i) for i, client in enumerate(clients)])
     assert pooled.shape == (len(rated), len(X_union))
-    assert np.array_equal(sorted_columns(pooled), sorted_columns(central_coverage(rated, X_union)))
+    assert np.array_equal(sorted_columns(pooled), sorted_columns(central_coverage(rated, X_union, y_union)))
 
 
 def test_shuffling_does_not_change_the_selection_problem(federation):
