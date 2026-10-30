@@ -248,3 +248,23 @@ def test_fallback_changes_nothing_where_a_rule_fires():
     fires = ~fallback.no_rule_fires(X)
     assert np.array_equal(fallback.predict(X)[fires], model.predict(X)[fires])
     assert np.array_equal(fallback.predict_proba(X), model.predict_proba(X))
+
+
+@pytest.mark.parametrize("alpha", [0.1, 1., 100.])
+def test_dirichlet_split_is_a_disjoint_partition_with_label_skew(alpha):
+    n = 1000
+    X = np.arange(n, dtype=float).reshape(-1, 1)
+    y = np.arange(n) % 4
+    split = horizontal_split(X, y, 4, seed=1, dirichlet_alpha=alpha)
+    assert sorted(np.concatenate(object_ids(split))) == list(range(n))
+    assert len(split.X_test) == pytest.approx(0.2 * n, abs=2)
+    assert min(len(c.X_train) + len(c.X_test) for c in split.clients) >= 5
+    shares = np.array([[np.mean(np.concatenate([c.y_train, c.y_test]) == label) for label in range(4)]
+                       for c in split.clients])
+    # with a small alpha a client is dominated by few classes, with a large alpha the classes are balanced
+    if alpha == 0.1:
+        assert shares.max(axis=1).mean() > 0.6
+    if alpha == 100.:
+        assert np.abs(shares - 0.25).max() < 0.1
+    same = horizontal_split(X, y, 4, seed=1, dirichlet_alpha=alpha)
+    assert np.array_equal(np.concatenate(object_ids(split)), np.concatenate(object_ids(same)))

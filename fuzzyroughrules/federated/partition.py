@@ -69,12 +69,40 @@ def _deal(indices: np.ndarray, y: np.ndarray, n_clients: int, stratify: bool) ->
     return [ordered[client::n_clients] for client in range(n_clients)]
 
 
+def _deal_dirichlet(
+        indices: np.ndarray,
+        y: np.ndarray,
+        n_clients: int,
+        alpha: float,
+        rng: np.random.Generator,
+        min_objects: int = 5,
+        max_tries: int = 1000
+) -> list[np.ndarray]:
+    """
+    Label skew: the objects of each class are divided over the clients in proportions drawn from a symmetric
+    Dirichlet distribution with parameter alpha. A small alpha gives clients with few classes. Draws are repeated until
+    every client has at least min_objects objects.
+    """
+    for _ in range(max_tries):
+        parts = [[] for _ in range(n_clients)]
+        for label in np.unique(y[indices]):
+            group = rng.permutation(indices[y[indices] == label])
+            bounds = np.round(np.cumsum(rng.dirichlet(np.full(n_clients, alpha))) * len(group)).astype(int)
+            for client, part in enumerate(np.split(group, bounds[:-1])):
+                parts[client].append(part)
+        parts = [rng.permutation(np.concatenate(part)) for part in parts]
+        if min(len(part) for part in parts) >= min_objects:
+            return parts
+    raise ValueError(f"No Dirichlet split with at least {min_objects} objects per client in {max_tries} tries.")
+
+
 def horizontal_split(
         X: np.ndarray,
         y: np.ndarray,
         n_clients: int,
         seed: int,
-        stratify: bool = True
+        stratify: bool = True,
+        dirichlet_alpha: float = None
 ) -> HorizontalSplit:
     """
     Beata's protocol: 80/20 global train/test split, equal and disjoint split of the training objects over the
@@ -84,13 +112,20 @@ def horizontal_split(
     :param n_clients: number of clients
     :param seed: seed of the random splits
     :param stratify: do we keep the class distribution in each split. The protocol does not specify this.
+    :param dirichlet_alpha: if given, the training objects are not divided equally but with label skew, see
+    _deal_dirichlet. The global test split and the train_local/test_local splits are as before. This is a non-IID
+    variant, not the protocol.
     :return: the global test set and the data of each client
     """
     rng = np.random.default_rng(seed)
     train, test = _hold_out(np.arange(len(X)), y, 0.2, rng, stratify)
 
+    if dirichlet_alpha is None:
+        parts = _deal(train, y, n_clients, stratify)
+    else:
+        parts = _deal_dirichlet(train, y, n_clients, dirichlet_alpha, rng)
     clients = []
-    for indices in _deal(train, y, n_clients, stratify):
+    for indices in parts:
         train_local, test_local = _hold_out(indices, y, 0.2, rng, stratify)
         clients.append(ClientData(X[train_local], y[train_local], X[test_local], y[test_local]))
     return HorizontalSplit(X[test], y[test], clients)
