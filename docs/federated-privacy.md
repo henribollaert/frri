@@ -80,7 +80,7 @@ While the global confidence of a rule is below its local confidence, its owner s
 and every client returns a minimum for the longer rule.
 
 - Every round reveals one more attribute value of the training object of every rule that is still being repaired.
-- The diagnosis in `docs/federated-improvements-report.md` (item B) shows that even the unshortened rule usually loses
+- The diagnosis in `experiments/diagnose_confidence.py` shows that even the unshortened rule usually loses
   confidence on the data of the other clients, so most rules never recover and end up with **all attributes, i.e. the
   complete training object**. In the run `python -m experiments.horizontal_fl_frri --loader builtin --data-dir wine
   --clients 3 --seed 0`, 12 of the 13 rules needed repair, 3 recovered, and 9 ended with all 13 attributes. The

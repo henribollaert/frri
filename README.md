@@ -432,9 +432,6 @@ All of these run from the root of the repository. Each has a module docstring wi
 | `experiments/parallel_clients.py` | Runs every client in its own process, and compares the derived parallel time of the rounds local fit, confidence and coverage with the time in the workers and the wall time. With more clients than CPU cores the clients share cores. | `python -m experiments.parallel_clients --dataset synthetic --clients 2 3 4 --seeds 0 1 2` |
 | `experiments/scaling.py` | Runs federated FRRI (set cover variant) and centralised FRRI on synthetic data of growing size, each size in a child process with a time and a memory limit. Repair and coverage rounds are not part of it. `--out` writes a CSV file. | `python -m experiments.scaling --sizes 1000 2000 4000 8000 --clients 3 --out scaling.csv` |
 
-**Results.** The results of this work are in [docs/federated-improvements-report.md](docs/federated-improvements-report.md).
-They are provisional.
-
 ## 8. Licence
 
 GPL-3.0. See the `LICENSE` file.
