@@ -77,6 +77,40 @@ def evaluate_rules(
     return minima, rule_coverage(rules, X, covering_threshold)
 
 
+def select_rules_from_coverage(
+        coverage: np.ndarray,
+        weights: np.ndarray = None,
+        uncovered=()
+) -> np.ndarray:
+    """
+    Rule selection step = solving of the optimisation problem
+    :param coverage: binary matrix of shape (n_rules, n_objects)
+    :param weights: cost of selecting each rule. The default is 1 for each rule, i.e. plain set cover
+    :param uncovered: objects that do not have to be covered
+    :return: indices of the selected rules
+    """
+    n_rules, n_objects = coverage.shape
+    if weights is None:
+        weights = np.ones(n_rules)
+
+    dis_model = gb.Model("discrete_rule_induction")
+    rules = []
+    for index in range(n_rules):
+        rules.append(dis_model.addVar(vtype=gb.GRB.BINARY, obj=weights[index]))
+    dis_model.modelSense = gb.GRB.MINIMIZE
+
+    for i in range(n_objects):
+        if i in uncovered:
+            continue
+        exp = gb.quicksum([coverage[index][i] * rules[index] for index in range(n_rules)])
+        dis_model.addConstr(exp >= 1)  # , name='Coverage requirement'
+
+    dis_model.setParam("OutputFlag", 0)
+    dis_model.optimize()
+
+    return np.array([index for index in range(n_rules) if rules[index].x > 0.99], dtype=int)
+
+
 class Approximation(Protocol):
     def get_approximation(self, X: np.ndarray, y: np.ndarray) -> np.ndarray:
         ...
@@ -236,28 +270,8 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         if candidates is None:
             candidates = range(self.n_samples_)
 
-        dis_model = gb.Model("discrete_rule_induction")
-        # print(full_dis_covering)
-        rules = []
-        for _ in candidates:
-            rules.append(dis_model.addVar(vtype=gb.GRB.BINARY, obj=1))
-        dis_model.modelSense = gb.GRB.MINIMIZE
-
-        for i in range(self.n_samples_):
-            if i in uncovered:
-                continue
-            exp = gb.quicksum([full_dis_covering[i][index] * rules[index] for index, _ in enumerate(candidates)])
-            dis_model.addConstr(exp >= 1)  # , name='Coverage requirement'
-
-        dis_model.setParam("OutputFlag", 0)
-        dis_model.optimize()
-
-        selected = []
-        for index, obj in enumerate(candidates):
-            if rules[index].x > 0.99:
-                selected.append(obj)
-
-        return np.array(selected)
+        selected = select_rules_from_coverage(full_dis_covering.T, uncovered=uncovered)
+        return np.array([candidates[index] for index in selected])
 
     def _relabel(self, X: np.ndarray, y: np.ndarray) -> (np.ndarray, np.ndarray):
         """
@@ -417,6 +431,13 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
 
     def get_info(self) -> str:
         return str(self)
+
+    def rule_labels(self) -> np.ndarray:
+        """
+        Rule decisions are indices in the classes_ of this model. This returns the actual class labels.
+        """
+        check_is_fitted(self)
+        return self.classes_[[rule.decision for rule in self.rules_]]
 
     def average_rule_length(self):
         if not hasattr(self, "approximation_"):
