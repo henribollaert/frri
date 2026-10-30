@@ -36,7 +36,19 @@ Things that contradict the code or documentation, recorded and not changed:
 
 ## Final test status
 
-<!-- filled in below -->
+Last run, after all changes (`python -m pytest -q tests`, Python 3.10.20):
+
+| environment | baseline | result |
+|---|---|---|
+| gurobipy 12.0.3 (restricted licence) | local re-recording from unmodified `9c1a6c0` (`FRRI_REGRESSION_BASELINE`) | 162 passed |
+| gurobipy 12.0.3 | committed baseline (gurobipy 10.0.1) | regression test: 2 failed (`iris-default`, `iris-granular`), 8 passed: the same 2 that fail on the unmodified commit, see above |
+| gurobipy 10.0.3 (requirements, licence expired) | committed baseline | 8 failed, 145 passed, 9 skipped |
+
+In the last environment, all 8 failures are in `test_regression_rulegenerator.py`: "auto" falls back on scipy, which
+resolves tied set covers differently from the Gurobi that recorded the baseline. They are exactly the 8 configurations
+in which `compare_solvers` (A) found other rules with the same number of rules. The 9 skipped tests are the ones in
+`test_rule_selection_solvers.py` that need a working Gurobi. On the unmodified commit this environment gave 45 failures
+and 32 errors. No test was skipped or changed to hide a failure.
 
 ## A. Solver fallback: done
 
@@ -302,7 +314,44 @@ reverted on its own.
 
 ### Scaling experiment
 
-<!-- filled in below -->
+`python -m experiments.scaling --sizes 1000 2000 4000 8000 16000 --clients 3 --time-limit 1200 --memory-limit-gb 10
+--set-cover-limit 300` (synthetic data, 10 features, 4 classes, 3 clients; every size in a fresh process; 20 minutes and
+10 GB per size and model; 300 s per set cover). The set covers use "auto", so above 2,000 rules or constraints the
+restricted Gurobi licence fails and scipy takes over.
+
+| objects | model | pooled `train_local` | rules | parallel (s) | sequential (s) | local fit, slowest client (s) | global set cover (s) | peak RSS (MB) | kB up / down | scipy fallback | time limit hit |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| 1000 | federated | 642 | 180 | 1.1 | 3.1 | 1.0 | 0.02 | 150 | 92 / 414 | no | no |
+| 2000 | federated | 1278 | 301 | 2.7 | 7.8 | 2.5 | 0.03 | 200 | 198 / 773 | no | no |
+| 4000 | federated | 2559 | 482 | 7.8 | 22.0 | 7.3 | 0.10 | 297 | 415 / 1283 | no | no |
+| 8000 | federated | 5119 | 873 | 23.0 | 66.9 | 21.3 | 0.23 | 388 | 1127 / 2479 | yes | no |
+| 16000 | federated | 10237 | 1938 | 384.2 | 1143.1 | 379.1 | 0.49 | 1185 | 3825 / 5379 | yes | yes |
+| 1000 | centralised | 642 | 174 | 3.8 | 3.8 | | | 255 | | no | no |
+| 2000 | centralised | 1278 | 299 | 11.7 | 11.7 | | | 257 | | no | no |
+| 4000 | centralised | 2559 | 503 | 341.1 | 341.1 | | | 725 | | yes | yes |
+| 8000 | centralised | 5119 | 899 | 470.1 | 470.1 | | | 1331 | | yes | yes |
+| 16000 | centralised | 10237 | 2037 | 991.6 | 991.6 | | | 2641 | | yes | yes |
+
+(The federated set cover at 4000 objects stays under the Gurobi limit because the objects that no candidate covers are
+left out: 2559 - 869 = 1690 constraints.)
+
+Observations, all under the restricted licence:
+- Up to 8000 objects the federated run is dominated by the local fits; confidence, coverage and the global set cover
+  take below 1 s each. The parallel time is about a third of the sequential time with 3 clients.
+- Centralised FRRI jumps from 11.7 s to 341 s at 4000 objects, because its set cover (2559 x 2559) falls back on scipy
+  and runs into the 300 s limit. From there on its times mostly measure that limit, and its rules are not proven
+  optimal.
+- At 16000 objects every client has about 3400 objects, so the **local** set cover of each client also falls back on
+  scipy and hits the 300 s limit; that is most of the 379 s of local fit. Peak memory stays far below the 10 GB limit
+  (1.2 GB federated, 2.6 GB centralised, in one process).
+- No size failed in the end, so the limit of this machine was not reached at 16000 objects.
+
+What failed: in the first run, the federated run at 16000 objects hit the 20-minute limit, while centralised FRRI
+finished. The cause was a bug in my scaling script: the time limit was only passed to the global set cover, not to the
+set covers inside the clients' local FRRI, so those ran in scipy without a limit. I fixed that (also in
+`experiments/horizontal_fl_frri.py`, where `--time-limit` now also reaches the local fits) and reran 8000 and 16000
+objects (`--models federated --sizes 8000 16000`, same options); the table shows the rerun. The 8000 result was the same
+as in the first run (873 rules).
 
 ## G. Protocol driver and evaluation: done
 
