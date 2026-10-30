@@ -26,6 +26,7 @@ from fuzzyroughrules.federated.aggregate import (
     build_global_model, global_confidence, set_cover, top_k_per_client, union_global, union_local
 )
 from fuzzyroughrules.federated.client import FederatedClient
+from fuzzyroughrules.federated.inference import with_fallback
 from fuzzyroughrules.federated.partition import (
     FixedRangeScaler, global_classes, global_min_max, horizontal_split, load_keel_dataset
 )
@@ -69,20 +70,54 @@ def training_times(rounds: list[list[float]], server_time: float = 0.) -> dict:
     }
 
 
-def describe(model: RuleGenerator, split, name: str, times: dict) -> dict:
+def describe(model: RuleGenerator, split, name: str, times: dict, default_label) -> dict:
+    """
+    The scores without suffix use FRRI inference, which gives the first class when no rule fires. The suffix
+    _relation_fallback means that such objects get the class of the rule with the highest relation, and _default_rule
+    that they get default_label.
+    """
+    relation = with_fallback(model, "relation")
+    default = with_fallback(model, "default", default_label)
     row = {
         "model": name,
         "n_rules": len(model.rules_),
         "avg_rule_length": model.average_rule_length(),
         **times,
         "global_test": balanced_accuracy_score(split.y_test, model.predict(split.X_test)),
+        "global_test_relation_fallback": balanced_accuracy_score(split.y_test, relation.predict(split.X_test)),
+        "global_test_default_rule": balanced_accuracy_score(split.y_test, default.predict(split.X_test)),
         "no_rule_fires_global_test": no_rule_fires(model, split.X_test),
     }
     local_scores = [balanced_accuracy_score(client.y_test, model.predict(client.X_test)) for client in split.clients]
     row["mean_test_local"] = np.mean(local_scores)
+    row["mean_test_local_relation_fallback"] = np.mean([
+        balanced_accuracy_score(client.y_test, relation.predict(client.X_test)) for client in split.clients
+    ])
     for index, score in enumerate(local_scores):
         row[f"test_local_{index}"] = score
     return row
+
+
+def class_recalls(model: RuleGenerator, split, name: str, classes: np.ndarray, default_label) -> list[dict]:
+    """
+    Recall of each global class on the global test set, for each way of handling objects for which no rule fires.
+    A class without test objects gets NaN.
+    """
+    rows = []
+    silent = np.all(model.predict_proba(split.X_test, normalized=False) == 0, axis=1)
+    for fallback in ("first", "relation", "default"):
+        predictions = with_fallback(model, fallback, default_label).predict(split.X_test)
+        for label in classes:
+            present = split.y_test == label
+            rows.append({
+                "model": name,
+                "fallback": fallback,
+                "label": label,
+                "n_global_test": int(np.sum(present)),
+                "recall": float(np.mean(predictions[present] == label)) if np.any(present) else np.nan,
+                "no_rule_fires": float(np.mean(silent[present])) if np.any(present) else np.nan,
+            })
+    return rows
 
 
 def run(
@@ -90,7 +125,7 @@ def run(
         y: np.ndarray,
         n_clients: int,
         seed: int
-) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict]:
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, dict, pd.DataFrame]:
     run_start = perf_counter()
     split = horizontal_split(X, y, n_clients, seed)
     clients = [FederatedClient(client.X_train, client.y_train) for client in split.clients]
@@ -142,11 +177,14 @@ def run(
     central.fit(np.vstack([client.X_train for client in clients]), np.concatenate([c.y_train for c in clients]))
     central_time = perf_counter() - start
 
-    rows = [
-        describe(build_global_model(rules, classes, scaler), split, name, times)
-        for name, (rules, times) in variants.items()
+    # only for the default-rule baseline: the class counts are not part of the protocol
+    default_label = classes[np.argmax(np.sum([client.label_counts(classes) for client in clients], axis=0))]
+    models = {name: (build_global_model(rules, classes, scaler), times) for name, (rules, times) in variants.items()}
+    models["centralised FRRI"] = (central, training_times([[central_time]]))
+    rows = [describe(model, split, name, times, default_label) for name, (model, times) in models.items()]
+    recall_rows = [
+        row for name, (model, _) in models.items() for row in class_recalls(model, split, name, classes, default_label)
     ]
-    rows.append(describe(central, split, "centralised FRRI", training_times([[central_time]])))
 
     local_rows = [{
         "client": index,
@@ -184,13 +222,13 @@ def run(
         "n_uncovered_in_set_cover": n_uncovered,
         "run_s": perf_counter() - run_start,
     }
-    return pd.DataFrame(rows), pd.DataFrame(local_rows), pd.DataFrame(round_rows), info
+    return pd.DataFrame(rows), pd.DataFrame(local_rows), pd.DataFrame(round_rows), info, pd.DataFrame(recall_rows)
 
 
 def log_run(log_file: Path, models: pd.DataFrame, data_dir: Path, X: np.ndarray, n_clients: int, seed: int):
     """
     Appends one row per model. The scores of the separate clients are left out, so that runs with a different number
-    of clients fit in the same file.
+    of clients fit in the same file. The same function logs the class recalls, with one row per model and class.
     """
     row = models.drop(columns=models.filter(regex=r"^test_local_\d").columns).assign(
         finished_at=datetime.now().isoformat(timespec="seconds"),
@@ -210,15 +248,18 @@ def main():
     parser.add_argument("--clients", type=int, default=2)
     parser.add_argument("--seed", type=int, default=0)
     parser.add_argument("--log-file", type=Path, help="CSV file that each run is appended to")
+    parser.add_argument("--class-log-file", type=Path, help="CSV file that the recall of each class is appended to")
     args = parser.parse_args()
 
     # a test_local part can miss a class, in which case balanced accuracy only uses the classes that are present
     warnings.filterwarnings("ignore", message="y_pred contains classes not in y_true")
 
     X, y = LOADERS[args.loader](args.data_dir)
-    models, local_models, rounds, info = run(X, y, args.clients, args.seed)
+    models, local_models, rounds, info, recalls = run(X, y, args.clients, args.seed)
     if args.log_file is not None:
         log_run(args.log_file, models, args.data_dir, X, args.clients, args.seed)
+    if args.class_log_file is not None:
+        log_run(args.class_log_file, recalls, args.data_dir, X, args.clients, args.seed)
 
     pd.set_option("display.width", 200, "display.max_columns", None)
     print(f"clients: {args.clients}, seed: {args.seed}")
@@ -230,6 +271,8 @@ def main():
     print(local_models.round(4).to_string(index=False))
     print("\nDuration of each round in seconds")
     print(rounds.round(4).to_string(index=False, na_rep=""))
+    print("\nRecall per class on the global test set, by fallback for objects for which no rule fires")
+    print(recalls.pivot_table(index=["model", "fallback"], columns="label", values="recall", sort=False).round(4))
 
 
 if __name__ == "__main__":

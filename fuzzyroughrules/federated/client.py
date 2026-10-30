@@ -20,6 +20,14 @@ class FederatedClient:
     def labels(self) -> np.ndarray:
         return np.unique(self.y_train)
 
+    def label_counts(self, classes: np.ndarray) -> np.ndarray:
+        """
+        Not part of the protocol: only the default-rule baseline needs it.
+        :param classes: the global classes
+        :return: the number of local objects of each class
+        """
+        return np.array([np.sum(self.y_train == label) for label in classes])
+
     def fit_local(self, scaler: FixedRangeScaler, classes: np.ndarray) -> list[RulePayload]:
         """
         Runs FRRI on the local data.

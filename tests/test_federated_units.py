@@ -9,6 +9,7 @@ from fuzzyroughrules.federated.aggregate import (
     build_global_model, global_confidence, plain_set_cover, set_cover, top_k_per_client, union_global, union_local
 )
 from fuzzyroughrules.federated.client import FederatedClient
+from fuzzyroughrules.federated.inference import with_fallback
 from fuzzyroughrules.federated.partition import (
     FixedRangeScaler, global_classes, global_min_max, horizontal_split
 )
@@ -210,3 +211,40 @@ def test_set_cover_objective_is_pluggable():
 
     selected, _ = set_cover(rules, coverage, expensive_first_rule)
     assert [r.values[0] for r in selected] == [1., 2.]
+
+
+def two_rules(confidence):
+    return [
+        RulePayload((0,), (0.2,), ("INDISCERNIBLE",), (1.,), "low", confidence),
+        RulePayload((0,), (0.8,), ("INDISCERNIBLE",), (1.,), "high", confidence),
+    ]
+
+
+def test_relation_fallback_uses_the_closest_rule_when_no_rule_fires():
+    classes = np.array(["high", "low"])
+    scaler = FixedRangeScaler(np.zeros(1), np.ones(1))
+    model = build_global_model(two_rules(0.1), classes, scaler)
+    X = np.array([[0.65], [0.25], [0.3]])
+    # a membership needs R > 0.9, so only the second object gets one
+    assert np.all(model.predict_proba(X, normalized=False)[[0, 2]] == 0)
+    assert model.predict(X).tolist() == ["high", "low", "high"]
+
+    relation = with_fallback(model, "relation")
+    assert relation.no_rule_fires(X).tolist() == [True, False, True]
+    assert relation.rule_relations(X)[0] == pytest.approx([0.85, 0.55])
+    assert relation.predict(X).tolist() == ["high", "low", "low"]
+    assert with_fallback(model, "default", "low").predict(X).tolist() == ["low", "low", "low"]
+    assert np.array_equal(with_fallback(model, "first").predict(X), model.predict(X))
+    with pytest.raises(ValueError):
+        with_fallback(model, "default").predict(X)
+    with pytest.raises(ValueError):
+        with_fallback(model, "nearest").predict(X)
+
+
+def test_fallback_changes_nothing_where_a_rule_fires():
+    X, y = load_wine().data, load_wine().target
+    model = RuleGenerator().fit(X, y)
+    fallback = with_fallback(model, "relation")
+    fires = ~fallback.no_rule_fires(X)
+    assert np.array_equal(fallback.predict(X)[fires], model.predict(X)[fires])
+    assert np.array_equal(fallback.predict_proba(X), model.predict_proba(X))

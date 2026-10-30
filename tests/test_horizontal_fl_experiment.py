@@ -20,7 +20,7 @@ def result():
 
 
 def test_every_model_gets_consistent_training_times(result):
-    _, (models, local_models, rounds, info) = result
+    _, (models, local_models, rounds, info, _) = result
     assert (models["train_s_parallel"] > 0).all()
     assert (models["train_s_parallel"] <= models["train_s_sequential"]).all()
 
@@ -40,7 +40,7 @@ def test_every_model_gets_consistent_training_times(result):
 
 
 def test_log_file_can_hold_runs_with_a_different_number_of_clients(result, tmp_path):
-    data, (models, _, _, _) = result
+    data, (models, _, _, _, _) = result
     log_file = Path(tmp_path) / "runs.csv"
     log_run(log_file, models, Path("wine"), data.data, 3, 0)
     fewer_clients = models.drop(columns="test_local_2")
