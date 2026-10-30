@@ -70,6 +70,15 @@ def training_times(rounds: list[list[float]], server_time: float = 0.) -> dict:
     }
 
 
+def local_score(model: RuleGenerator, client) -> float:
+    """
+    Balanced accuracy on the test_local data of a client, NaN if it has none, which a non-IID split can give.
+    """
+    if len(client.y_test) == 0:
+        return np.nan
+    return balanced_accuracy_score(client.y_test, model.predict(client.X_test))
+
+
 def describe(model: RuleGenerator, split, name: str, measures: dict, default_label) -> dict:
     """
     The scores without suffix use FRRI inference, which gives the first class when no rule fires. The suffix
@@ -94,11 +103,9 @@ def describe(model: RuleGenerator, split, name: str, measures: dict, default_lab
         "pooled_test_local": balanced_accuracy_score(y_pooled, model.predict(X_pooled)),
         "pooled_test_local_relation_fallback": balanced_accuracy_score(y_pooled, relation.predict(X_pooled)),
     }
-    local_scores = [balanced_accuracy_score(client.y_test, model.predict(client.X_test)) for client in split.clients]
-    row["mean_test_local"] = np.mean(local_scores)
-    row["mean_test_local_relation_fallback"] = np.mean([
-        balanced_accuracy_score(client.y_test, relation.predict(client.X_test)) for client in split.clients
-    ])
+    local_scores = [local_score(model, client) for client in split.clients]
+    row["mean_test_local"] = np.nanmean(local_scores)
+    row["mean_test_local_relation_fallback"] = np.nanmean([local_score(relation, client) for client in split.clients])
     for index, score in enumerate(local_scores):
         row[f"test_local_{index}"] = score
     return row
@@ -256,9 +263,7 @@ def run(
         "n_rules": len(client.model.rules_),
         "avg_rule_length": client.model.average_rule_length(),
         "train_s": fit_times[index],
-        "own_test_local": balanced_accuracy_score(
-            split.clients[index].y_test, client.model.predict(split.clients[index].X_test)
-        ),
+        "own_test_local": local_score(client.model, split.clients[index]),
     } for index, client in enumerate(clients)]
 
     needed_repair = [

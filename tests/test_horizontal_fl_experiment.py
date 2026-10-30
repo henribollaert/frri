@@ -96,3 +96,11 @@ def test_recorder_adds_up_repeated_rounds_and_traces_memory():
     assert totals["bytes_down"] == 4 * 16
     assert totals["peak_extra_mb"] > 0.7
     assert totals["train_s_sequential"] >= totals["train_s_parallel"] > 0
+
+
+def test_non_iid_run_handles_a_client_without_test_local():
+    data = load_wine()
+    models, local_models, _, _, _ = run(data.data, data.target, 5, 0, dirichlet_alpha=0.5)
+    # this split gives a client too small to have test_local data
+    assert local_models["own_test_local"].isna().any()
+    assert models["mean_test_local"].notna().all()
