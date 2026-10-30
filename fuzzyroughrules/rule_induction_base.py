@@ -1,12 +1,18 @@
+import warnings
 from typing import Protocol
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.optimize import Bounds, LinearConstraint, milp
+from scipy.sparse import csr_matrix
 from sklearn.base import BaseEstimator, ClassifierMixin
 from sklearn.preprocessing import normalize, MinMaxScaler
 from sklearn.utils.multiclass import check_classification_targets
 from sklearn.utils.validation import check_X_y, check_array, check_is_fitted
-import gurobipy as gb
+try:
+    import gurobipy as gb
+except ImportError:  # the rule selection can use scipy instead
+    gb = None
 from fuzzyroughrules.operators import RelationTypes, triangular_relation, ImplicatorInclusion
 from fuzzyroughrules.approximations import LowerApproximation
 from fuzzyroughrules.feature_preprocessors import QuickReduct
@@ -77,22 +83,11 @@ def evaluate_rules(
     return minima, rule_coverage(rules, X, covering_threshold)
 
 
-def select_rules_from_coverage(
-        coverage: np.ndarray,
-        weights: np.ndarray = None,
-        uncovered=()
-) -> np.ndarray:
-    """
-    Rule selection step = solving of the optimisation problem
-    :param coverage: binary matrix of shape (n_rules, n_objects)
-    :param weights: cost of selecting each rule. The default is 1 for each rule, i.e. plain set cover
-    :param uncovered: objects that do not have to be covered
-    :return: indices of the selected rules
-    """
-    n_rules, n_objects = coverage.shape
-    if weights is None:
-        weights = np.ones(n_rules)
+SOLVERS = ("auto", "gurobi", "scipy")
 
+
+def _select_with_gurobi(coverage: np.ndarray, weights: np.ndarray, uncovered) -> np.ndarray:
+    n_rules, n_objects = coverage.shape
     dis_model = gb.Model("discrete_rule_induction")
     rules = []
     for index in range(n_rules):
@@ -109,6 +104,55 @@ def select_rules_from_coverage(
     dis_model.optimize()
 
     return np.array([index for index in range(n_rules) if rules[index].x > 0.99], dtype=int)
+
+
+def _select_with_scipy(coverage: np.ndarray, weights: np.ndarray, uncovered) -> np.ndarray:
+    n_rules, n_objects = coverage.shape
+    required = np.setdiff1d(np.arange(n_objects), np.asarray(uncovered, dtype=int))
+    constraints = None
+    if required.size > 0:
+        constraints = LinearConstraint(csr_matrix(coverage[:, required].T), lb=1, ub=np.inf)
+    result = milp(np.asarray(weights, dtype=float), constraints=constraints, integrality=np.ones(n_rules),
+                  bounds=Bounds(0, 1))
+    if not result.success:
+        raise RuntimeError(f"scipy.optimize.milp could not solve the rule selection: {result.message}")
+    return np.flatnonzero(result.x > 0.5)
+
+
+def select_rules_from_coverage(
+        coverage: np.ndarray,
+        weights: np.ndarray = None,
+        uncovered=(),
+        solver: str = "auto"
+) -> np.ndarray:
+    """
+    Rule selection step = solving of the optimisation problem
+    :param coverage: binary matrix of shape (n_rules, n_objects)
+    :param weights: cost of selecting each rule. The default is 1 for each rule, i.e. plain set cover
+    :param uncovered: objects that do not have to be covered
+    :param solver: "gurobi", "scipy" (scipy.optimize.milp, i.e. HiGHS) or "auto". Auto uses Gurobi, and falls back on
+    scipy with a warning if gurobipy is not installed or raises an error, e.g. for an expired or size-limited licence.
+    Both solve the problem to optimality, but tied optima can be resolved differently.
+    :return: indices of the selected rules
+    """
+    if solver not in SOLVERS:
+        raise ValueError(f"Unknown solver: {solver}. Use one of {SOLVERS}.")
+    n_rules, n_objects = coverage.shape
+    if weights is None:
+        weights = np.ones(n_rules)
+
+    if solver == "scipy":
+        return _select_with_scipy(coverage, weights, uncovered)
+    if solver == "gurobi":
+        if gb is None:
+            raise ImportError("The gurobi solver needs gurobipy.")
+        return _select_with_gurobi(coverage, weights, uncovered)
+    if gb is not None:
+        try:
+            return _select_with_gurobi(coverage, weights, uncovered)
+        except gb.GurobiError as error:
+            warnings.warn(f"Gurobi can not be used ({error}), the rule selection uses scipy.optimize.milp instead.")
+    return _select_with_scipy(coverage, weights, uncovered)
 
 
 class Approximation(Protocol):
@@ -148,6 +192,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         approximation (Approximation): The approximation to use. (default = LowerApproximation())
         inclusion_measure (InclusionMeasure): The inclusion measure to use. (default = ImplicatorInclusion())
         attribute_ordering (FeatureOrdering): The attribute ordering to use during the reduction step. (default = QuickReduct())
+        solver (str): Solver of the rule selection: "auto", "gurobi" or "scipy", see select_rules_from_coverage. (default = "auto")
         scaler = None
     """
     with_reducts: bool = True
@@ -167,6 +212,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
     approximation: Approximation = None
     inclusion_measure: InclusionMeasure = None
     attribute_ordering: FeatureOrdering = None
+    solver: str = "auto"
     matching_tnorm = None
     covering_tnorm = None
     scaler = None
@@ -270,7 +316,7 @@ class RuleGenerator(BaseEstimator, ClassifierMixin):
         if candidates is None:
             candidates = range(self.n_samples_)
 
-        selected = select_rules_from_coverage(full_dis_covering.T, uncovered=uncovered)
+        selected = select_rules_from_coverage(full_dis_covering.T, uncovered=uncovered, solver=self.solver)
         return np.array([candidates[index] for index in selected])
 
     def _relabel(self, X: np.ndarray, y: np.ndarray) -> (np.ndarray, np.ndarray):

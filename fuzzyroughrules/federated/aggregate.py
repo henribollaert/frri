@@ -94,7 +94,8 @@ def plain_set_cover(rules: list[RulePayload]) -> np.ndarray:
 def set_cover(
         rules: list[RulePayload],
         coverage: np.ndarray,
-        objective: Callable[[list[RulePayload]], np.ndarray] = plain_set_cover
+        objective: Callable[[list[RulePayload]], np.ndarray] = plain_set_cover,
+        solver: str = "auto"
 ) -> tuple[list[RulePayload], int]:
     """
     Variant (d): solves the set cover problem over the coverage pooled from all clients. Objects that are covered by
@@ -103,10 +104,11 @@ def set_cover(
     :param rules: the candidate rules, with their global confidence
     :param coverage: pooled binary coverage of shape (n_rules, n_objects), in the order of the rules
     :param objective: gives the cost of selecting each rule
+    :param solver: solver of the set cover, see select_rules_from_coverage
     :return: the rules of the global model, the number of objects that are not covered
     """
     uncovered = np.flatnonzero(np.sum(coverage, axis=0) == 0)
-    selected = select_rules_from_coverage(coverage, objective(rules), uncovered)
+    selected = select_rules_from_coverage(coverage, objective(rules), uncovered, solver)
     return [rules[i] for i in selected], len(uncovered)
 
 

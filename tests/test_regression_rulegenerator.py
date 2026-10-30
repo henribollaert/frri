@@ -3,9 +3,11 @@ Regression test: non-federated rule generators must keep giving the rules and pr
 `main` before the federated work started.
 
 The baseline depends on the Gurobi version, as tied set covers can resolve differently. To record it again, run this
-file directly with the --record flag. Only do this on an unmodified `main`.
+file directly with the --record flag. Only do this on an unmodified `main`. To compare against a baseline that was
+recorded elsewhere, e.g. with another Gurobi version, set FRRI_REGRESSION_BASELINE to its path.
 """
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -17,7 +19,9 @@ from sklearn.model_selection import train_test_split
 from fuzzyroughrules.full_inclusion_frri import GranularRuleGenerator
 from fuzzyroughrules.rule_induction_base import RuleGenerator
 
-BASELINE = Path(__file__).parent / "data" / "rulegenerator_baseline.json"
+BASELINE = Path(os.environ.get(
+    "FRRI_REGRESSION_BASELINE", Path(__file__).parent / "data" / "rulegenerator_baseline.json"
+))
 
 DATASETS = {"iris": load_iris, "wine": load_wine}
 CONFIGS = {

@@ -3,7 +3,10 @@ import numpy as np
 import warnings
 from scipy.stats import gamma
 import copy
-import gurobipy as gb
+try:
+    import gurobipy as gb
+except ImportError:  # only the Gurobi based approximations need it
+    gb = None
 
 
 big_num = 1e7
