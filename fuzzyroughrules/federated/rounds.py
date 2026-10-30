@@ -14,6 +14,12 @@ from fuzzyroughrules.federated.aggregate import global_confidence, plain_set_cov
 from fuzzyroughrules.federated.client import FederatedClient
 from fuzzyroughrules.federated.payload import RulePayload
 
+class PerClient(list):
+    """
+    A broadcast that differs per client: item i is what client i gets.
+    """
+
+
 ClientMap = Callable[..., list]
 ServerStep = Callable[[str, Callable[[], object]], object]
 REPAIR_TOLERANCE = 1e-6  # the inclusion threshold of FRRI allows the local confidence to be this much too high
@@ -72,7 +78,7 @@ def repair_rules(
         extended = map_clients("repair: extend", clients, lambda owner, client: {
             p: client.extend_rule(positions[p][1], rules[owner][positions[p][1]])
             for p in active if positions[p][0] == owner
-        }, [positions[p][1] for p in active])
+        }, PerClient([[positions[p][1] for p in active if positions[p][0] == owner] for owner in range(len(rules))]))
         extended = {p: rule for proposals in extended for p, rule in proposals.items() if rule is not None}
         if not extended:
             break
